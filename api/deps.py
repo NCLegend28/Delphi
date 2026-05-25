@@ -13,6 +13,7 @@ from fastapi import Request
 
 from memory.entities import EntityIndex
 from memory.vault import VaultWriter
+from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient
 from routing.classifier import Classifier
 from routing.roster import Roster
@@ -42,6 +43,15 @@ def get_request_logger(request: Request) -> RequestLogger:
 
 def get_entity_index(request: Request) -> EntityIndex:
     return request.app.state.entity_index
+
+
+def get_vault_reader(request: Request) -> VaultReader | None:
+    """The read-only vault reader, or ``None`` when unset (minimal test apps).
+
+    Returns ``None`` rather than raising so the chat route can skip the
+    vault-query agent and fall back to a normal completion.
+    """
+    return getattr(request.app.state, "vault_reader", None)
 
 
 def get_metrics(request: Request) -> Metrics:

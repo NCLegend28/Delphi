@@ -167,8 +167,10 @@ Tali's Python conventions (uv, Pydantic, ruff, pytest, no `print` in libs).
 
 ## Obsidian memory model
 
-The vault path is `OBSIDIAN_VAULT_PATH` in `.env`. The service writes (never
-reads — Obsidian is the reader) into this structure:
+The vault path is `OBSIDIAN_VAULT_PATH` in `.env`. The service is
+write-primary — Obsidian is the main reader — but the **vault-query agent**
+(see below) now also *reads* notes on demand to ground `vault_query` answers.
+Writes land in this structure:
 
 ```
 <vault>/
@@ -270,6 +272,8 @@ Optional:
 | `WORKER_ENABLED`               | `false`              | Offload persist to the arq worker; else inline |
 | `REDIS_URL`                    | `redis://localhost:6379` | Persist-queue broker         |
 | `WORKER_METRICS_PORT`          | `9100`               | Worker's Prometheus port (normal-path metrics) |
+| `VAULT_AGENT_ENABLED`          | `true`               | Tool-calling vault search on `vault_query` requests |
+| `VAULT_AGENT_MAX_STEPS`        | `5`                  | Max tool rounds before the agent must answer |
 | `DELPHI_MODEL_CHAT`            | `phi4:14b`           | Model for `chat` task            |
 | `DELPHI_MODEL_CODE`            | `qwen2.5-coder:14b`  | Model for `code` task            |
 | `DELPHI_MODEL_REASON`          | `deepseek-r1:14b`    | Model for `reason` task          |
@@ -589,6 +593,22 @@ date, decision, rationale.
   `.env.docker.example`. Caddy injects the bearer token onto proxied `/v1`
   calls server-side, so the secret never enters the browser bundle or the
   image (single-tenant, Tailscale-gated trust model).
+- **2026-05-25** — **Vault-query agent.** `vault_query` was a recognized task
+  type that routed to a model but never consulted the vault — answers were
+  ungrounded. It now runs a bounded tool-calling loop: the model is given
+  read-only `search_vault` / `read_note` tools (`memory/vault_reader.py`,
+  `routing/vault_agent.py`) and drives search→read→answer over the vault, the
+  way a person (or Claude) would. Chosen over keyword-RAG-injection and an
+  embedding sidecar because it matches how the vault is actually explored;
+  retrieval stays keyword-based under the hood (swap for embeddings behind the
+  same `VaultReader` interface later). Bounded by `VAULT_AGENT_MAX_STEPS` so a
+  model can't loop or run up cloud cost; the loop runs non-streaming, then the
+  final answer is framed as SSE for streaming clients. This is the first time
+  the service *reads* note content (was write-primary). `read_note` is
+  path-confined to the vault — traversal/symlink escapes are refused. Requires
+  a tool-capable `DELPHI_MODEL_VAULT_QUERY`; if the model ignores the tools the
+  answer flows through ungrounded. Still **not** a vector DB — the embedding
+  sidecar future hook remains the upgrade path for semantic recall.
 
 ---
 

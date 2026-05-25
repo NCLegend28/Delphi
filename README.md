@@ -104,7 +104,11 @@ with `WORKER_ENABLED` unset and a local `OLLAMA_BASE_URL`.
 End-to-end: auth → resolver → soul → proxy → vault (with entity wikilinks
 and threshold-promoted entity stubs) → JSONL log → Prometheus metrics.
 Templates are user-overridable via a directory passed to `TemplateRenderer`.
+`vault_query` requests run an agentic tool loop (`search_vault` / `read_note`)
+that grounds answers in your notes — keyword retrieval today, swappable for a
+semantic index behind the same `VaultReader` interface.
 
 Not yet built: `/admin/reload-roster`, per-client roster overrides, the
-embedding sidecar for semantic vault search, function-calling translation.
+embedding sidecar for *semantic* vault search, general function-calling
+translation (the vault agent is purpose-built, not a generic tool proxy).
 

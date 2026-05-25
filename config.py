@@ -40,6 +40,16 @@ class Config(BaseSettings):
     memory_enabled: bool = True
     entity_create_threshold: int = 2
 
+    # --- Vault-query agent ---
+    # When a request resolves to ``vault_query``, the model is given read-only
+    # search/read tools over the vault and runs a bounded tool-calling loop to
+    # ground its answer in Tali's notes. Disable to fall back to a plain
+    # (ungrounded) completion. ``max_steps`` caps the tool rounds so a model
+    # can't loop forever or run up cloud cost. Requires a tool-capable model
+    # for ``DELPHI_MODEL_VAULT_QUERY``.
+    vault_agent_enabled: bool = True
+    vault_agent_max_steps: int = 5
+
     # --- Worker / queue ---
     # The persist pipeline (entity extraction, vault write, JSONL log, metrics)
     # runs out-of-process on the worker, fed by a Redis-backed arq queue. When

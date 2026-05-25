@@ -36,17 +36,21 @@ from api.deps import (
     get_request_logger,
     get_roster,
     get_vault,
+    get_vault_reader,
 )
 from auth.bearer import require_bearer
+from config import get_config
 from memory.entities import EntityIndex
 from memory.persist import run_persist
 from memory.record import ConversationRecord, Message, Timings, TokenCounts
 from memory.vault import VaultWriter
+from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
 from routing.classifier import Classifier
 from routing.resolver import resolve_model
 from routing.roster import Roster
 from routing.soul import soul_for
+from routing.vault_agent import run_vault_agent
 from telemetry.logger import RequestLogger
 from telemetry.metrics import Metrics
 from worker.queue import PERSIST_JOB
@@ -184,6 +188,134 @@ def _openai_response(
     return payload
 
 
+async def _sse_from_text(text: str, finish_reason: str = "stop") -> AsyncIterator[bytes]:
+    """Frame a complete answer as OpenAI SSE chunks.
+
+    The vault agent runs non-streaming (it has to see tool results before it
+    can answer), so by the time we have text the whole answer exists. We still
+    emit it as SSE so streaming clients get the shape they expect — one content
+    chunk, a finish chunk, then ``[DONE]``.
+    """
+    content_chunk = {"choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]}
+    yield f"data: {json.dumps(content_chunk)}\n\n".encode()
+    done_chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]}
+    yield f"data: {json.dumps(done_chunk)}\n\n".encode()
+    yield b"data: [DONE]\n\n"
+
+
+async def _handle_vault_query(
+    *,
+    request_id: str,
+    t0: int,
+    ollama: OllamaClient,
+    model: str,
+    full_messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    reader: VaultReader,
+    max_steps: int,
+    resolved: Any,
+    record_messages: tuple[Message, ...],
+    soul_injected: bool,
+    client_id: str | None,
+    stream_requested: bool,
+    arq_pool: Any,
+    vault: VaultWriter,
+    request_logger: RequestLogger,
+    entity_index: EntityIndex,
+    metrics: Metrics,
+) -> Any:
+    """Run the vault agent, then feed its answer through the same record →
+    persist → response machinery the streaming path uses. Non-streaming during
+    the tool loop; the final answer is framed as SSE for streaming clients."""
+    try:
+        agent = await run_vault_agent(
+            ollama=ollama,
+            model=model,
+            messages=full_messages,
+            options=options,
+            reader=reader,
+            max_steps=max_steps,
+        )
+    except OllamaError as exc:
+        t2 = time.monotonic_ns()
+        error_record = ConversationRecord(
+            request_id=request_id,
+            messages=record_messages,
+            soul_injected=soul_injected,
+            client_id=client_id,
+            stream_requested=stream_requested,
+            resolved=resolved,
+            assistant_response="",
+            finish_reason="error",
+            truncated=False,
+            timings=Timings(received_ms=0.0, ttft_ms=None, completed_ms=(t2 - t0) / _NS_PER_MS),
+            token_counts=None,
+            error=str(exc),
+            ollama_status=502,
+        )
+        _fire(
+            _enqueue_or_persist(
+                error_record,
+                arq_pool=arq_pool,
+                vault=vault,
+                logger=request_logger,
+                entity_index=entity_index,
+                metrics=metrics,
+            )
+        )
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "error": {"code": "UPSTREAM_ERROR", "message": "ollama upstream failed", "details": {}}
+            },
+            headers={"X-Request-ID": request_id},
+        )
+
+    t2 = time.monotonic_ns()
+    done_record = ConversationRecord(
+        request_id=request_id,
+        messages=(*record_messages, Message(role="assistant", content=agent.content)),
+        soul_injected=soul_injected,
+        client_id=client_id,
+        stream_requested=stream_requested,
+        resolved=resolved,
+        assistant_response=agent.content,
+        finish_reason="stop",
+        truncated=False,
+        timings=Timings(received_ms=0.0, ttft_ms=None, completed_ms=(t2 - t0) / _NS_PER_MS),
+        token_counts=agent.token_counts,
+        error=None,
+        ollama_status=200,
+    )
+    _fire(
+        _enqueue_or_persist(
+            done_record,
+            arq_pool=arq_pool,
+            vault=vault,
+            logger=request_logger,
+            entity_index=entity_index,
+            metrics=metrics,
+        )
+    )
+
+    if stream_requested:
+        return StreamingResponse(
+            _sse_from_text(agent.content),
+            media_type="text/event-stream",
+            headers={"X-Request-ID": request_id, "Cache-Control": "no-cache"},
+        )
+    return JSONResponse(
+        content=_openai_response(
+            request_id=request_id,
+            model=model,
+            content=agent.content,
+            finish_reason="stop",
+            token_counts=agent.token_counts,
+        ),
+        headers={"X-Request-ID": request_id},
+    )
+
+
 # --- route ---------------------------------------------------------------
 
 
@@ -200,6 +332,7 @@ async def chat_completions(
     entity_index: EntityIndex = Depends(get_entity_index),
     metrics: Metrics = Depends(get_metrics),
     arq_pool: Any = Depends(get_arq_pool),
+    reader: VaultReader | None = Depends(get_vault_reader),
 ) -> Any:
     request_id = f"req_{ULID()}"
     t0 = time.monotonic_ns()
@@ -231,6 +364,37 @@ async def chat_completions(
         for m in full_messages
         if isinstance(m, dict)
     )
+
+    # vault_query → run the agentic tool loop over the vault so the answer is
+    # grounded in Tali's notes. Falls through to the plain proxy below when the
+    # agent is disabled, no reader is mounted, or the vault dir isn't there yet.
+    cfg = get_config()
+    if (
+        cfg.vault_agent_enabled
+        and resolved.task_type == "vault_query"
+        and reader is not None
+        and reader.available
+    ):
+        return await _handle_vault_query(
+            request_id=request_id,
+            t0=t0,
+            ollama=ollama,
+            model=resolved.model,
+            full_messages=full_messages,
+            options=options,
+            reader=reader,
+            max_steps=cfg.vault_agent_max_steps,
+            resolved=resolved,
+            record_messages=record_messages,
+            soul_injected=soul_injected,
+            client_id=client_id,
+            stream_requested=stream_requested,
+            arq_pool=arq_pool,
+            vault=vault,
+            request_logger=request_logger,
+            entity_index=entity_index,
+            metrics=metrics,
+        )
 
     # Open the upstream stream eagerly so we can detect 502s before committing
     # to a 200 streaming response.

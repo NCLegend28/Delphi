@@ -33,6 +33,7 @@ from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
 from memory.vault import VaultWriter
+from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
 from routing.classifier import Classifier
 from routing.roster import Roster
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     vault = VaultWriter(cfg.obsidian_vault_path, cfg.timezone)
     request_logger = RequestLogger(cfg.log_dir, cfg.timezone)
     entity_index = EntityIndex(cfg.obsidian_vault_path, threshold=cfg.entity_create_threshold)
+    vault_reader = VaultReader(cfg.obsidian_vault_path)
     metrics = Metrics()
 
     # The persist queue is an offload, not a dependency. If the worker is
@@ -75,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.vault = vault
     app.state.request_logger = request_logger
     app.state.entity_index = entity_index
+    app.state.vault_reader = vault_reader
     app.state.metrics = metrics
     app.state.arq_pool = arq_pool
 

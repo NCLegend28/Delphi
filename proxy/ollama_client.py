@@ -71,13 +71,22 @@ class OllamaClient:
         self,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Non-streaming chat completion. Returns the parsed JSON body verbatim."""
+        """Non-streaming chat completion. Returns the parsed JSON body verbatim.
+
+        ``tools`` carries OpenAI-style function schemas; when supplied, a
+        tool-capable model may answer with ``choices[0].message.tool_calls``
+        instead of content. The proxy stays dumb — it forwards the schemas and
+        returns whatever the model decides; the caller runs the tool loop.
+        """
         body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
         if options:
             body["options"] = options
+        if tools:
+            body["tools"] = tools
 
         try:
             response = await self._client.post("/v1/chat/completions", json=body)
