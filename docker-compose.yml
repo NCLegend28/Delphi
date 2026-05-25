@@ -98,8 +98,16 @@ services:
     restart: unless-stopped
     env_file: .env.docker
     ports:
-      - "80:80"
-      - "443:443"
+      # Loopback-only by default — the stack is reached over Tailscale, never
+      # the public internet. Caddy injects the bearer token, so "who can reach
+      # Caddy" IS the auth boundary; keeping it private keeps that boundary
+      # meaningful. On the VPS, front it with Tailscale's own HTTPS:
+      #   sudo tailscale serve --bg --https=443 http://127.0.0.1:80
+      #   → open https://<machine>.<your-tailnet>.ts.net/
+      # For a PUBLIC domain instead: change to "80:80" + "443:443" (binds
+      # 0.0.0.0) and set DELPHI_DOMAIN to your hostname — Caddy auto-issues a
+      # Let's Encrypt cert. Only do that if you accept public reachability.
+      - "127.0.0.1:80:80"
     volumes:
       - caddy-data:/data
       - caddy-config:/config

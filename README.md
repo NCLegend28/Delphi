@@ -78,13 +78,34 @@ redis         → durable arq job queue
 cp .env.docker.example .env.docker
 #   set DELPHI_BEARER_TOKEN  (openssl rand -hex 32)
 #   set OLLAMA_API_KEY       (from https://ollama.com → Settings → Keys)
-#   set DELPHI_DOMAIN        (real hostname for auto-HTTPS, or ":80" to test)
+#   leave DELPHI_DOMAIN=:80  (Tailscale fronts TLS — see below) unless you own a domain
 #   verify the DELPHI_MODEL_* cloud tags against the current cloud catalog
 
 docker compose up -d --build
-docker compose ps              # all four healthy
-curl http://localhost/healthz  # {"status":"ok"}
+docker compose ps                    # all four healthy
+curl http://127.0.0.1/healthz        # {"status":"ok"} (loopback — Caddy binds 127.0.0.1)
 ```
+
+**Access over Tailscale (default — no domain needed).** Caddy binds to
+loopback, so the stack is private; Tailscale provides the public-facing HTTPS
+and restricts reach to your tailnet. This keeps the auth model honest — Caddy
+injects the bearer token, so "who can reach Caddy" *is* the auth boundary, and
+Tailscale keeps that boundary private.
+
+```bash
+# on the VPS, once
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+# front the stack with Tailscale's own HTTPS cert (no domain, no ACME)
+sudo tailscale serve --bg --https=443 http://127.0.0.1:80
+sudo tailscale serve status          # shows the https://<machine>.<tailnet>.ts.net URL
+```
+
+Then open `https://<machine>.<your-tailnet>.ts.net/` from any device on your
+tailnet — UI at `/`, API under `/v1`. UFW only needs SSH open; **do not** expose
+80/443 publicly. (For a *public* domain instead: set `DELPHI_DOMAIN` to the
+hostname and publish 80/443 in `docker-compose.yml` — Caddy auto-issues a Let's
+Encrypt cert. Only do that if you accept public reachability.)
 
 **Fail-open offload.** If `WORKER_ENABLED=false`, or Redis is unreachable, the
 gateway runs the persist pipeline inline instead of enqueuing — the API
