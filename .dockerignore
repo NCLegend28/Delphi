@@ -1,0 +1,45 @@
+# Keep the build context tiny and reproducible. The image installs deps from
+# pyproject.toml + uv.lock and builds the UI from source — never copy local
+# build artifacts in (they bloat the context and can leak host-specific state).
+
+# Python envs & caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / UI build artifacts (rebuilt inside the image)
+**/node_modules/
+ui/dist/
+
+# macOS AppleDouble litter from the external drive
+._*
+.DS_Store
+
+# Secrets & local env — injected at runtime, never baked into the image
+.env
+.env.*
+!.env.docker.example
+
+# VCS & editor
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+
+# Docs / session scratch that the runtime doesn't need
+docs/sessions/
+*.md
+!README.md
+
+# Local logs
+*.log
+var/

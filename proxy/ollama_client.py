@@ -27,12 +27,20 @@ class OllamaClient:
         self,
         base_url: str,
         *,
+        api_key: str | None = None,
         timeout: httpx.Timeout | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout or DEFAULT_TIMEOUT
-        self._client = client or httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout)
+        # Ollama Cloud authenticates with a bearer token; a local Ollama needs
+        # none. Attach the header at the client level so every request (tags,
+        # chat, stream) carries it without per-call plumbing. A caller-supplied
+        # client is used verbatim — the caller owns its auth.
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        self._client = client or httpx.AsyncClient(
+            base_url=self._base_url, timeout=self._timeout, headers=headers
+        )
         self._owns_client = client is None
 
     async def aclose(self) -> None:

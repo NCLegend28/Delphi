@@ -1,0 +1,9 @@
+{
+  "Reasoning": ["zebra_puzzle", "spatial"],
+  "Coding": ["code_generation"],
+  "Agentic Coding": ["python", "javascript"],
+  "Mathematics": ["AMPS_Hard", "math_comp"],
+  "Data Analysis": ["tablejoin"],
+  "Language": ["connections", "typos"],
+  "IF": ["paraphrase", "summarize"]
+}

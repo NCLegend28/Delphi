@@ -1,0 +1,119 @@
+# Delphi full stack for an 8 GB VPS. Inference runs on Ollama Cloud, so no
+# model weights or GPU live here — these four small services fit comfortably.
+#
+#   cp .env.docker.example .env.docker   # fill in token + Ollama Cloud key
+#   docker compose up -d --build
+#
+# Services:
+#   caddy         — TLS edge, serves the built UI, proxies the API (injects auth)
+#   delphi        — FastAPI gateway; enqueues persist jobs, streams from Ollama Cloud
+#   delphi-worker — drains the queue: entity extraction, vault writes, logs, metrics
+#   redis         — durable arq job queue between gateway and worker
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Light persistence so a restart doesn't drop queued persist jobs.
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  delphi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      # Wiring that's fixed by the compose topology (overrides .env.docker).
+      WORKER_ENABLED: "true"
+      REDIS_URL: "redis://redis:6379"
+      DELPHI_PORT: "8080"
+      OBSIDIAN_VAULT_PATH: "/vault"
+      LOG_DIR: "/var/log/delphi"
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    volumes:
+      - vault:/vault
+      - logs:/var/log/delphi
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 4s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  delphi-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      WORKER_ENABLED: "true"
+      REDIS_URL: "redis://redis:6379"
+      OBSIDIAN_VAULT_PATH: "/vault"
+      LOG_DIR: "/var/log/delphi"
+      WORKER_METRICS_PORT: "9100"
+      # The worker never calls Ollama; skip the boot probe it doesn't need.
+      BOOT_PROBE_ENABLED: "false"
+    command: ["arq", "worker.main.WorkerSettings"]
+    volumes:
+      - vault:/vault
+      - logs:/var/log/delphi
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9100/metrics"]
+      interval: 15s
+      timeout: 4s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  caddy:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.caddy
+    restart: unless-stopped
+    env_file: .env.docker
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      delphi:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  redis-data:
+  vault:
+  logs:
+  caddy-data:
+  caddy-config:

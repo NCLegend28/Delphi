@@ -94,9 +94,21 @@ Delphi/
 │   ├── logger.py                ← structured JSONL logger
 │   └── metrics.py               ← Prometheus exposition (optional)
 │
+├── worker/                      ← out-of-process persistence (arq + Redis)
+│   ├── __init__.py
+│   ├── queue.py                 ← job name + pool factory (shared producer/consumer)
+│   ├── serde.py                 ← ConversationRecord ⇄ JSON for the queue
+│   └── main.py                  ← arq WorkerSettings; runs memory.persist.run_persist
+│
 ├── auth/
 │   ├── __init__.py
 │   └── bearer.py                ← FastAPI dependency for bearer auth
+│
+├── benchmarks/                  ← ops CLI: rank models per task from leaderboards
+│   ├── sources/                 ← one adapter per leaderboard (aider, livebench, …)
+│   ├── map.py                   ← task_type → weighted (source, category) blend
+│   ├── rank.py                  ← composite scoring + sort
+│   └── cli.py                   ← `uv run python -m benchmarks rank --task code`
 │
 ├── tests/
 │   ├── test_classifier.py
@@ -104,9 +116,14 @@ Delphi/
 │   ├── test_vault.py
 │   └── test_e2e.py
 │
+├── Dockerfile                   ← uv multi-stage; one image, gateway + worker
+├── docker-compose.yml           ← caddy + delphi + delphi-worker + redis
+├── .env.docker.example          ← compose-stack env (Ollama Cloud, token)
+│
 └── deploy/
-    ├── systemd.service          ← delphi.service unit file
-    ├── Caddyfile                ← reverse proxy + bearer auth
+    ├── systemd.service          ← delphi.service unit file (bare-metal path)
+    ├── Caddyfile                ← TLS + UI static + API proxy (injects bearer)
+    ├── Dockerfile.caddy         ← builds UI bundle, serves it behind Caddy
     └── bootstrap.sh             ← one-shot VM setup script
 ```
 
@@ -238,25 +255,74 @@ Pydantic Settings, loaded from `.env`. Required vars:
 | Variable                 | Purpose                                          |
 |--------------------------|--------------------------------------------------|
 | `DELPHI_BEARER_TOKEN`    | Auth token clients must present                  |
-| `OLLAMA_BASE_URL`        | Usually `http://localhost:11434`                 |
+| `OLLAMA_BASE_URL`        | `http://localhost:11434` local, `https://ollama.com` cloud |
 | `OBSIDIAN_VAULT_PATH`    | Absolute path to vault on the VM                 |
 | `LOG_DIR`                | `/var/log/delphi`                                |
 | `TIMEZONE`               | `America/Chicago` (Tali is in Dallas)            |
 
 Optional:
 
-| Variable                  | Default            | Purpose                          |
-|---------------------------|--------------------|----------------------------------|
-| `CLASSIFY_ENABLED`        | `true`             | If false, use `model` from req   |
-| `MEMORY_ENABLED`          | `true`             | If false, skip vault writes      |
-| `CLASSIFIER_MODEL`        | `phi-3.5-mini:3.8b`| Override classifier              |
-| `DEFAULT_MODEL`           | `phi-4:14b`        | Fallback when classifier fails   |
-| `ENTITY_CREATE_THRESHOLD` | `2`                | Mentions before auto-creating    |
+| Variable                       | Default              | Purpose                          |
+|--------------------------------|----------------------|----------------------------------|
+| `OLLAMA_API_KEY`               | `""`                 | Bearer for Ollama Cloud; empty for local |
+| `CLASSIFY_ENABLED`             | `true`               | If false, use `model` from req   |
+| `MEMORY_ENABLED`               | `true`               | If false, skip vault writes      |
+| `WORKER_ENABLED`               | `false`              | Offload persist to the arq worker; else inline |
+| `REDIS_URL`                    | `redis://localhost:6379` | Persist-queue broker         |
+| `WORKER_METRICS_PORT`          | `9100`               | Worker's Prometheus port (normal-path metrics) |
+| `DELPHI_MODEL_CHAT`            | `phi4:14b`           | Model for `chat` task            |
+| `DELPHI_MODEL_CODE`            | `qwen2.5-coder:14b`  | Model for `code` task            |
+| `DELPHI_MODEL_REASON`          | `deepseek-r1:14b`    | Model for `reason` task          |
+| `DELPHI_MODEL_MULTILINGUAL`    | `gemma3:12b`         | Model for `multilingual` task    |
+| `DELPHI_MODEL_DEEP_CODE`       | `qwen2.5-coder:32b`  | Model for `deep_code` task       |
+| `DELPHI_MODEL_DEEP_REASON`     | `deepseek-r1:32b`    | Model for `deep_reason` task     |
+| `DELPHI_MODEL_VAULT_QUERY`     | `phi4:14b`           | Model for `vault_query` task     |
+| `DELPHI_MODEL_CLASSIFIER`      | `phi3.5:3.8b`        | Tiny classifier model            |
+| `ENTITY_CREATE_THRESHOLD`      | `2`                  | Mentions before auto-creating    |
+
+Per-task sampling options (temperature, etc.) stay in code at
+`routing/roster.py:TASK_METADATA`; only the model tag is env-driven. To
+evolve a category: change the env var, `ollama pull <new>`, restart, then
+`ollama rm <old>` once you're satisfied.
 
 Secrets layering: `.env` for local dev → Doppler in prod. Same pattern as
 every other project in `~/projects/`.
 
 ---
+
+## Model evolution (`benchmarks/`)
+
+Because every roster slot is now env-driven (`DELPHI_MODEL_*`), the
+question "which model should serve `code` next month?" is an evidence
+question, not a vibes question. The `benchmarks/` package crawls public
+leaderboards, normalizes them onto a common model-name key, and ranks
+the available local models per Delphi task type.
+
+```bash
+uv run python -m benchmarks tasks                     # show task → blend
+uv run python -m benchmarks fetch                     # refresh caches
+uv run python -m benchmarks rank --task code --ollama-only
+```
+
+Three layers, each replaceable:
+
+1. **`sources/`** — one adapter per leaderboard. Today: Aider polyglot
+   (coding), LiveBench (reasoning/coding/math/language/IF/data-analysis),
+   Ollama library (availability filter). Add new sources by copying
+   `aider.py` and registering in `cli._build_sources`.
+2. **`map.py`** — the opinionated blend. For each task type, declares
+   which `(source, category)` pairs predict real-world quality and how
+   to weight them. Tune as evidence accumulates.
+3. **`rank.py`** — joins on the canonical model key, applies weights,
+   drops any model missing a required component (no zero-imputation).
+
+Cached payloads live in `~/.cache/delphi-benchmarks` with a 24h TTL.
+Source URLs are documented per-module with a "verify on update" note —
+leaderboards do rotate file paths between releases.
+
+When a ranking surfaces a clear winner, update the matching
+`DELPHI_MODEL_*` in `.env`, `ollama pull` the new tag, restart, then
+`ollama rm` the old tag once you're satisfied. No code change required.
 
 ## Key conventions
 
@@ -340,6 +406,47 @@ back to classification or the `DEFAULT_MODEL`.
 
 ---
 
+## UI (`ui/` — delphi-ui)
+
+Delphi ships with a first-party interface. It lives at `ui/` inside this
+repo and talks to the FastAPI service as just another OpenAI-compatible
+client. Aesthetic: dark holographic war room — a three-zone environment
+(canvas + preview + chat rail) rather than a chat box. See `ui/CLAUDE.md`
+for stack, layout, and phase plan.
+
+**Multi-device, adaptive shell.** The same UI runs everywhere Tali wants
+Delphi to surface:
+
+| Device class      | Typical viewport       | Layout mode                                 |
+|-------------------|------------------------|---------------------------------------------|
+| Phone             | 360–430 × 800+         | chat-first, preview as full-screen overlay  |
+| Small LCD / Pi HAT | 320 × 240 – 800 × 480 | compact: chat rail + minimal HUD strip      |
+| Raspberry Pi 7"   | 800 × 480              | two-zone: chat + collapsible preview        |
+| Laptop            | 1280 × 800 – 1440 × 900| full three-zone layout                      |
+| Desktop / wall    | 1920+ × 1080+          | full layout, larger canvas, more breathing  |
+
+The layout uses CSS container queries / responsive grid — same component
+tree everywhere, no separate mobile build. Reduced-motion is honored.
+
+**Client identification.** The UI sends `x-client-id: delphi-ui` on every
+request. The service uses this in two places:
+
+1. `routing/soul.py:soul_for(task_type, client_id=…)` appends a UI protocol
+   block (see `UI_PROTOCOL_APPENDIX`) teaching the model the inline
+   directive grammar — `[MODE:…]`, `[TASK:…]`, `[PREVIEW:…]…[/PREVIEW]`.
+   The UI parses these out of the stream and routes them to mode badge,
+   active-task label, and preview box.
+2. Telemetry (`request.client_id`) so UI requests are filterable in logs.
+
+Directives are opt-in. The model may emit none — plain text still
+renders fine; the UI just stays in `IDLE` mode with an empty preview.
+
+**Dev loop.** `cd ui && npm run dev` runs Vite at `:5173`, proxying
+`/v1`, `/healthz`, `/readyz` to `localhost:8080`. The backend must be
+running locally for chat to work end-to-end.
+
+---
+
 ## Human-in-the-loop hooks
 
 This service has no real-world side effects beyond writing to the vault and
@@ -413,8 +520,6 @@ a working install. Read it before running it.
 
 ## What this service is NOT
 
-- **Not a chat UI.** Open WebUI is the chat UI. This is the brain Open WebUI
-  talks to.
 - **Not a Claude failover destination by itself.** AgentRig's failover logic
   treats this as one of several local options — same as the M4 MLX path.
 - **Not a vector database.** Obsidian is markdown + graph. If semantic search
@@ -444,6 +549,46 @@ date, decision, rationale.
   project notes would create noise; let Tali shape the project taxonomy.
 - **2026-05-10** — Streaming-first endpoint. Rationale: matches OpenAI API
   parity; long 32B responses need TTFT feedback or the client looks frozen.
+- **2026-05-17** — First-party UI (`ui/`) added; "not a chat UI" line
+  removed from `What this service is NOT`. Rationale: Open WebUI is a fine
+  generic client but Delphi has earned a dedicated surface — a JARVIS-style
+  three-zone environment (canvas + preview + chat rail) that adapts from
+  small LCDs and Raspberry Pi screens up through desktops. The UI is just
+  another OpenAI-compatible client (`x-client-id: delphi-ui`); the service
+  remains backend-only. No multi-tenancy is introduced.
+- **2026-05-17** — `soul_for(task_type, *, client_id=…)` gains a UI
+  protocol appendix gated on `client_id == "delphi-ui"`. Rationale:
+  models need to learn the `[MODE:…]` / `[TASK:…]` / `[PREVIEW:…]`
+  directive grammar only when an interface is listening. Other clients
+  (AgentRig, raw curl) get the unmodified soul.
+- **2026-05-24** — Inference can run on **Ollama Cloud**, not just a local
+  GPU box. `OllamaClient` gains an optional `api_key` → `Authorization: Bearer`
+  header; `OLLAMA_BASE_URL=https://ollama.com` + `OLLAMA_API_KEY` selects it.
+  Rationale: the target deploy is an 8 GB CPU VPS that physically cannot load
+  the 14B local roster (a 9 GB model needs >8 GB RAM, no GPU). Same wire
+  protocol; only the bearer header and model tags change. Local-GPU operation
+  is unchanged (empty key, localhost URL). Caveat: cloud hosts large models
+  under different tags and has no tiny classifier model — the classifier
+  becomes a cloud call (use a smaller cloud tag, or set `CLASSIFY_ENABLED=false`
+  and have clients send `task_type`).
+- **2026-05-24** — Persistence moves **out of process to a worker** over a
+  Redis-backed arq queue (`worker/`). The gateway streams the response, then
+  enqueues a serialized `ConversationRecord`; the worker runs the same
+  `run_persist` pipeline (entity extraction, vault write, JSONL log, metrics).
+  Rationale: keep disk I/O and entity-index scans off the request path on a
+  small box. **Fail-open:** when `WORKER_ENABLED=false` or Redis is
+  unreachable, the gateway runs `run_persist` inline — memory is best-effort,
+  the API contract is sacred. The `_persist` helpers moved from `api/chat.py`
+  to `memory/persist.py` so gateway and worker share one implementation.
+  Metrics stay symmetric: worker owns the normal path (`:9100/metrics`),
+  gateway owns the inline-fallback path (`/metrics`); Prometheus scrapes both.
+- **2026-05-24** — **Docker full-stack deploy** added: `Dockerfile` (uv
+  multi-stage, one image for gateway + worker), `deploy/Dockerfile.caddy`
+  (builds the UI, serves it + reverse-proxies the API), `docker-compose.yml`
+  (caddy + delphi + delphi-worker + redis, with mem limits for an 8 GB box),
+  `.env.docker.example`. Caddy injects the bearer token onto proxied `/v1`
+  calls server-side, so the secret never enters the browser bundle or the
+  image (single-tenant, Tailscale-gated trust model).
 
 ---
 

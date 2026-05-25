@@ -19,9 +19,10 @@ Boot sequence (per CLAUDE.md → Boot sequence):
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncIterator, Any
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -29,7 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from api.chat import router as chat_router
 from api.deps import get_metrics, get_ollama, get_roster
 from auth.bearer import require_bearer
-from config import Config, get_config
+from config import get_config
 from memory.entities import EntityIndex
 from memory.vault import VaultWriter
 from proxy.ollama_client import OllamaClient, OllamaError
@@ -37,6 +38,7 @@ from routing.classifier import Classifier
 from routing.roster import Roster
 from telemetry.logger import RequestLogger, configure_stdlib_logging
 from telemetry.metrics import Metrics
+from worker.queue import create_persist_pool
 
 log = structlog.get_logger("delphi.main")
 
@@ -47,13 +49,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cfg = get_config()
     log.info("delphi_boot", config=cfg.redacted())
 
-    ollama = OllamaClient(cfg.ollama_base_url)
-    classifier = Classifier(ollama, cfg.classifier_model)
-    roster = Roster()
+    ollama = OllamaClient(cfg.ollama_base_url, api_key=cfg.ollama_api_key or None)
+    classifier = Classifier(ollama, cfg.delphi_model_classifier)
+    roster = Roster.from_config(cfg)
     vault = VaultWriter(cfg.obsidian_vault_path, cfg.timezone)
     request_logger = RequestLogger(cfg.log_dir, cfg.timezone)
     entity_index = EntityIndex(cfg.obsidian_vault_path, threshold=cfg.entity_create_threshold)
     metrics = Metrics()
+
+    # The persist queue is an offload, not a dependency. If the worker is
+    # enabled but Redis is down, fall back to inline persist (the chat route
+    # handles ``arq_pool is None``). Never crash boot over best-effort memory.
+    arq_pool = None
+    if cfg.worker_enabled:
+        try:
+            arq_pool = await create_persist_pool(cfg.redis_url)
+            log.info("arq_pool_ready", redis=cfg.redis_url)
+        except Exception as exc:
+            log.warning("arq_pool_unavailable", redis=cfg.redis_url, error=str(exc))
+            arq_pool = None
 
     app.state.ollama = ollama
     app.state.classifier = classifier
@@ -62,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.request_logger = request_logger
     app.state.entity_index = entity_index
     app.state.metrics = metrics
+    app.state.arq_pool = arq_pool
 
     if cfg.boot_probe_enabled:
         try:
@@ -70,7 +85,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log.error("ollama_unreachable", error=str(exc), base_url=cfg.ollama_base_url)
             raise SystemExit(f"Ollama unreachable at {cfg.ollama_base_url}: {exc}") from exc
 
-        missing = sorted(set(roster.all_models()) - set(available))
+        required = set(roster.all_models()) | {cfg.delphi_model_classifier}
+        missing = sorted(required - set(available))
         if missing:
             log.warning("roster_models_missing", missing=missing)
 
@@ -87,6 +103,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ollama.aclose()
+        if arq_pool is not None:
+            await arq_pool.aclose()
         log.info("delphi_shutdown")
 
 

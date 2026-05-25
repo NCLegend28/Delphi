@@ -22,11 +22,13 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from ulid import ULID
 
 from api.deps import (
+    get_arq_pool,
     get_classifier,
     get_entity_index,
     get_metrics,
@@ -36,16 +38,21 @@ from api.deps import (
     get_vault,
 )
 from auth.bearer import require_bearer
-from memory.entities import EntityIndex, ProcessedExchange
+from memory.entities import EntityIndex
+from memory.persist import run_persist
 from memory.record import ConversationRecord, Message, Timings, TokenCounts
-from memory.vault import ConversationNote, VaultWriter, WriteResult
+from memory.vault import VaultWriter
 from proxy.ollama_client import OllamaClient, OllamaError
 from routing.classifier import Classifier
 from routing.resolver import resolve_model
 from routing.roster import Roster
 from routing.soul import soul_for
-from telemetry.logger import RequestLogger, make_record
-from telemetry.metrics import Metrics, RequestStatus
+from telemetry.logger import RequestLogger
+from telemetry.metrics import Metrics
+from worker.queue import PERSIST_JOB
+from worker.serde import to_payload
+
+log = structlog.get_logger("delphi.chat")
 
 router = APIRouter()
 
@@ -67,13 +74,6 @@ def _fire(coro: Any) -> None:
 
 def _has_system_message(messages: list[dict[str, Any]]) -> bool:
     return any(isinstance(m, dict) and m.get("role") == "system" for m in messages)
-
-
-def _last_user_content(messages: tuple[Message, ...]) -> str:
-    for message in reversed(messages):
-        if message.role == "user":
-            return message.content
-    return ""
 
 
 def _parse_sse_buffer(buffer: list[bytes]) -> tuple[str, str | None, TokenCounts | None]:
@@ -123,131 +123,36 @@ def _parse_sse_buffer(buffer: list[bytes]) -> tuple[str, str | None, TokenCounts
     return "".join(text_parts), finish_reason, tokens
 
 
-def _to_conversation_note(
-    record: ConversationRecord, processed: ProcessedExchange
-) -> ConversationNote:
-    classifier_confidence = None
-    if record.resolved and record.resolved.classifier_result:
-        classifier_confidence = record.resolved.classifier_result.confidence
-
-    return ConversationNote(
-        timestamp=record.timestamp,
-        task_type=record.resolved.task_type if record.resolved else "unknown",
-        models=[record.resolved.model] if record.resolved else [],
-        classifier_confidence=classifier_confidence,
-        latency_ms=int(record.timings.completed_ms) if record.timings else 0,
-        input_tokens=record.token_counts.input_tokens if record.token_counts else 0,
-        output_tokens=record.token_counts.output_tokens if record.token_counts else 0,
-        user_message=processed.annotated_user,
-        assistant_message=processed.annotated_assistant,
-        project=processed.project,
-        entities=[f"[[{name}]]" for name in processed.entities],
-        tags=[],
-        client_id=record.client_id,
-        truncated=record.truncated,
-    )
-
-
-def _to_request_record(
+async def _enqueue_or_persist(
     record: ConversationRecord,
-    write_result: WriteResult,
-    processed: ProcessedExchange,
-) -> Any:
-    classifier_confidence = None
-    if record.resolved and record.resolved.classifier_result:
-        classifier_confidence = record.resolved.classifier_result.confidence
-
-    ttft_ms: int | None = None
-    if record.timings and record.timings.ttft_ms is not None:
-        ttft_ms = int(record.timings.ttft_ms)
-    latency_ms = int(record.timings.completed_ms) if record.timings else 0
-
-    return make_record(
-        request_id=record.request_id,
-        client_id=record.client_id,
-        task_type=record.resolved.task_type if record.resolved else "unknown",
-        classifier_confidence=classifier_confidence,
-        model=record.resolved.model if record.resolved else "unknown",
-        latency_ms=latency_ms,
-        ttft_ms=ttft_ms,
-        input_tokens=record.token_counts.input_tokens if record.token_counts else 0,
-        output_tokens=record.token_counts.output_tokens if record.token_counts else 0,
-        vault_write={
-            "ok": write_result.ok,
-            "path": write_result.path,
-            "error": write_result.error,
-        },
-        error=record.error,
-        # Carried as extras until/unless the canonical log schema grows.
-        ollama_status=record.ollama_status,
-        resolution_source=record.resolved.source if record.resolved else None,
-        soul_injected=record.soul_injected,
-        schema_version=record.schema_version,
-        entities_referenced=processed.entities,
-        entities_promoted=processed.promoted,
-        project=processed.project,
-    )
-
-
-async def _persist(
-    record: ConversationRecord,
+    *,
+    arq_pool: Any,
     vault: VaultWriter,
     logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
 ) -> None:
-    """Single background task: process entities, write the vault note, log the line."""
-    project_hint: str | None = None
-    if record.resolved and record.resolved.classifier_result:
-        project_hint = record.resolved.classifier_result.project
+    """Hand the finished exchange to the worker, or persist it inline if we can't.
 
-    processed = await entity_index.process(
-        user_text=_last_user_content(record.messages),
-        assistant_text=record.assistant_response,
-        project_hint=project_hint,
+    Normal path: enqueue a serialized record to Redis and return — the worker
+    does the disk I/O. Fallback path: if the queue is disabled (``arq_pool is
+    None``) or the enqueue fails (Redis hiccup), run the same pipeline inline so
+    the exchange is never silently lost. Memory is best-effort but not careless.
+    """
+    if arq_pool is not None:
+        try:
+            await arq_pool.enqueue_job(PERSIST_JOB, to_payload(record))
+            return
+        except Exception as exc:  # degrade to inline persist on any Redis hiccup
+            log.warning(
+                "enqueue_failed_persisting_inline",
+                request_id=record.request_id,
+                error=str(exc),
+            )
+
+    await run_persist(
+        record, vault=vault, logger=logger, entity_index=entity_index, metrics=metrics
     )
-    write_result = await vault.write(_to_conversation_note(record, processed))
-    await logger.log(
-        _to_request_record(record, write_result, processed), ts=record.timestamp
-    )
-    _record_metrics(record, processed, write_result, metrics)
-
-
-def _record_metrics(
-    record: ConversationRecord,
-    processed: ProcessedExchange,
-    write_result: WriteResult,
-    metrics: Metrics,
-) -> None:
-    """All Prometheus updates for one exchange. Cheap, sync, no exceptions raised."""
-    if record.resolved is None:
-        return  # auth failed before resolution — no useful labels available
-
-    status: RequestStatus
-    if record.error:
-        status = "upstream_error" if record.ollama_status and record.ollama_status >= 500 else "error"
-    else:
-        status = "ok"
-
-    classifier_confidence = None
-    if record.resolved.classifier_result is not None:
-        classifier_confidence = record.resolved.classifier_result.confidence
-
-    metrics.record_request(
-        task_type=record.resolved.task_type,
-        model=record.resolved.model,
-        resolution_source=record.resolved.source,
-        status=status,
-        latency_ms=record.timings.completed_ms if record.timings else 0.0,
-        ttft_ms=record.timings.ttft_ms if record.timings else None,
-        input_tokens=record.token_counts.input_tokens if record.token_counts else 0,
-        output_tokens=record.token_counts.output_tokens if record.token_counts else 0,
-        classifier_confidence=classifier_confidence,
-    )
-    metrics.record_vault_write(ok=write_result.ok)
-    metrics.record_entities_promoted(len(processed.promoted))
-    if status == "upstream_error":
-        metrics.record_upstream_error(kind="non_200")
 
 
 def _openai_response(
@@ -294,6 +199,7 @@ async def chat_completions(
     request_logger: RequestLogger = Depends(get_request_logger),
     entity_index: EntityIndex = Depends(get_entity_index),
     metrics: Metrics = Depends(get_metrics),
+    arq_pool: Any = Depends(get_arq_pool),
 ) -> Any:
     request_id = f"req_{ULID()}"
     t0 = time.monotonic_ns()
@@ -311,7 +217,10 @@ async def chat_completions(
 
     full_messages: list[dict[str, Any]] = list(raw_messages)
     if soul_injected:
-        soul_msg = {"role": "system", "content": soul_for(resolved.task_type)}
+        soul_msg = {
+            "role": "system",
+            "content": soul_for(resolved.task_type, client_id=client_id),
+        }
         full_messages = [soul_msg, *full_messages]
 
     entry = roster.lookup(resolved.task_type)
@@ -354,7 +263,16 @@ async def chat_completions(
             error=str(exc),
             ollama_status=502,
         )
-        _fire(_persist(error_record, vault, request_logger, entity_index, metrics))
+        _fire(
+            _enqueue_or_persist(
+                error_record,
+                arq_pool=arq_pool,
+                vault=vault,
+                logger=request_logger,
+                entity_index=entity_index,
+                metrics=metrics,
+            )
+        )
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={
@@ -409,7 +327,16 @@ async def chat_completions(
                 error=None,
                 ollama_status=200,
             )
-            _fire(_persist(done_record, vault, request_logger, entity_index, metrics))
+            _fire(
+                _enqueue_or_persist(
+                    done_record,
+                    arq_pool=arq_pool,
+                    vault=vault,
+                    logger=request_logger,
+                    entity_index=entity_index,
+                    metrics=metrics,
+                )
+            )
 
     if stream_requested:
         return StreamingResponse(

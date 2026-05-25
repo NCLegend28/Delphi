@@ -1,0 +1,23 @@
+# Edge image: builds the Vite UI to static files, then serves them behind Caddy
+# alongside a reverse proxy to the gateway. Build context is the repo root so
+# both `ui/` and this Caddyfile are reachable:
+#
+#   docker build -f deploy/Dockerfile.caddy -t delphi-caddy .
+#
+# The bearer token is injected onto proxied /v1 requests by Caddy at runtime
+# (see Caddyfile) — it is NOT baked into the JS bundle, so no secret lands in
+# the browser or the image.
+
+# --- build the UI bundle ----------------------------------------------------
+FROM node:22-slim AS ui-build
+WORKDIR /ui
+# Install against the committed lockfile first for a cached deps layer.
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build   # → /ui/dist
+
+# --- caddy serving static UI + proxying the API -----------------------------
+FROM caddy:2-alpine AS runtime
+COPY --from=ui-build /ui/dist /srv
+COPY deploy/Caddyfile /etc/caddy/Caddyfile

@@ -7,6 +7,8 @@ which path got them there.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import Request
 
 from memory.entities import EntityIndex
@@ -44,3 +46,12 @@ def get_entity_index(request: Request) -> EntityIndex:
 
 def get_metrics(request: Request) -> Metrics:
     return request.app.state.metrics
+
+
+def get_arq_pool(request: Request) -> Any:
+    """The persist-queue pool, or ``None`` when the worker is disabled/unreachable.
+
+    Returns ``None`` rather than raising so the chat route can fall back to
+    inline persist without special-casing missing state.
+    """
+    return getattr(request.app.state, "arq_pool", None)

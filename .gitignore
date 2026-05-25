@@ -18,6 +18,7 @@ env/
 .env
 .env.*
 !.env.example
+!.env.docker.example
 
 # Test / type / lint caches
 .pytest_cache/
@@ -31,6 +32,16 @@ htmlcov/
 .idea/
 *.swp
 .DS_Store
+# macOS AppleDouble metadata — exFAT/external drives litter these everywhere.
+._*
+
+# Node / UI build
+node_modules/
+ui/dist/
+
+# Stray literal "~" dir — guards against an un-expanded OBSIDIAN_VAULT_PATH
+# writing into the repo instead of the home dir (see config._expand_user).
+/~/
 
 # Runtime artifacts
 *.log

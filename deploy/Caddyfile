@@ -1,0 +1,33 @@
+# Delphi edge config. Caddy terminates TLS, serves the built UI as static
+# files, and reverse-proxies the API to the gateway container.
+#
+# {$DELPHI_DOMAIN} drives Caddy's automatic HTTPS:
+#   - a real hostname (delphi.your-tailnet.ts.net) → Caddy fetches a cert
+#   - ":80" or "localhost" → plain HTTP, no ACME (use for first-boot testing)
+#
+# Auth model: this is a single-tenant, Tailscale-gated box. The bearer token
+# lives only here (server-side) — Caddy stamps it onto every proxied API call
+# via `header_up`, so the browser bundle never holds a secret and the gateway
+# still enforces the token (defense in depth). Anyone who can reach Caddy on
+# the tailnet is trusted; isolation, if ever needed, is a per-tenant fork.
+
+{$DELPHI_DOMAIN} {
+	encode zstd gzip
+
+	# API surface → gateway. Inject the real bearer regardless of what the
+	# client sent, so the UI never needs to hold the token.
+	@api path /v1/* /healthz /readyz /metrics
+	handle @api {
+		reverse_proxy delphi:8080 {
+			header_up Authorization "Bearer {$DELPHI_BEARER_TOKEN}"
+		}
+	}
+
+	# Everything else is the SPA. try_files falls back to index.html so
+	# client-side routes resolve.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

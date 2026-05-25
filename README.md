@@ -57,6 +57,48 @@ Success looks like: streamed response in the terminal, a fresh `.md` in the
 date-stamped conversations folder, a JSONL line in `requests.jsonl`, and a
 non-zero counter on the metrics endpoint.
 
+## Docker deployment (VPS, inference on Ollama Cloud)
+
+For a GPU-less host (e.g. an 8 GB VPS), Delphi runs as a four-service stack and
+offloads inference to **Ollama Cloud** — no model weights or GPU live on the
+box. The gateway streams the response, then hands persistence to a **worker**
+over a Redis queue, so disk writes never sit on the request path.
+
+```
+Caddy (TLS + UI + reverse proxy, injects bearer)
+  ├── /v1, /healthz, /readyz, /metrics → delphi (FastAPI gateway)
+  └── /                                → built UI bundle
+delphi        → streams from Ollama Cloud; enqueues persist jobs
+delphi-worker → entity extraction + vault write + JSONL log + metrics (:9100)
+redis         → durable arq job queue
+```
+
+```bash
+# On the VPS, in the repo:
+cp .env.docker.example .env.docker
+#   set DELPHI_BEARER_TOKEN  (openssl rand -hex 32)
+#   set OLLAMA_API_KEY       (from https://ollama.com → Settings → Keys)
+#   set DELPHI_DOMAIN        (real hostname for auto-HTTPS, or ":80" to test)
+#   verify the DELPHI_MODEL_* cloud tags against the current cloud catalog
+
+docker compose up -d --build
+docker compose ps              # all four healthy
+curl http://localhost/healthz  # {"status":"ok"}
+```
+
+**Fail-open offload.** If `WORKER_ENABLED=false`, or Redis is unreachable, the
+gateway runs the persist pipeline inline instead of enqueuing — the API
+contract is sacred, memory is best-effort. Prometheus scrapes both
+`delphi:8080/metrics` (inline-fallback path) and `delphi-worker:9100/metrics`
+(normal path).
+
+**Vault sync.** `OBSIDIAN_VAULT_PATH=/vault` is a named volume the worker
+writes into. Point Obsidian Sync / git / syncthing at it to pull notes down to
+your other machines — that's out of this stack's scope.
+
+The same code still runs the local single-process way (`uv run python main.py`)
+with `WORKER_ENABLED` unset and a local `OLLAMA_BASE_URL`.
+
 ## Status
 
 End-to-end: auth → resolver → soul → proxy → vault (with entity wikilinks

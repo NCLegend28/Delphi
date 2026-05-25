@@ -1,0 +1,12 @@
+# Manual model-name overrides for the canonicalizer.
+#
+# Keys are case-insensitive raw names as they appear in a leaderboard
+# (or as a user might type one). Values are the canonical join key.
+# Add an entry only when ``normalize.canonicalize`` can't produce the
+# same key for two names that refer to the same checkpoint — silent
+# join misses are the failure mode this file exists to prevent.
+
+[aliases]
+"deepseek-r1-distill-qwen-14b" = "deepseek-r1-14b"
+"deepseek-r1-distill-qwen-32b" = "deepseek-r1-32b"
+"deepseek-r1-distill-llama-70b" = "deepseek-r1-70b"
