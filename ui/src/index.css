@@ -1,31 +1,54 @@
 @import "tailwindcss";
 
+/*
+ * Delphi UI — Mission Control theme.
+ *
+ * Palette and type ported from delphi_mission_control.html into Tailwind v4
+ * @theme tokens. Token NAMES are kept stable (--color-bg-*, --color-accent-*,
+ * --color-text-*, --color-border-*) so components reference one system; the
+ * VALUES were retuned to the deeper, multi-tier mission-control palette.
+ */
 @theme {
-  --color-bg-deep: #070b14;
-  --color-bg-panel: #0d1424;
-  --color-bg-panel-elev: #111a30;
-  --color-border-glow: rgba(0, 212, 255, 0.13);
-  --color-border-strong: rgba(0, 212, 255, 0.32);
-  --color-accent-cyan: #00d4ff;
-  --color-accent-amber: #ff9500;
-  --color-accent-violet: #7c3aed;
-  --color-text-primary: #e8f4fd;
-  --color-text-muted: #4a6a8a;
-  --color-text-dim: #2c4156;
+  /* Background tiers — void (deepest) → raised (panel surfaces) */
+  --color-bg-void: #020408;
+  --color-bg-deep: #060c14;
+  --color-bg-surface: #0b1523;
+  --color-bg-panel: #0e1c2e;
+  --color-bg-raised: #122030;
 
-  --font-display: "Orbitron", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-sans: "Inter", system-ui, sans-serif;
+  /* Borders — dim (hairlines) → strong (focused edges) */
+  --color-border-dim: #1a2f47;
+  --color-border-mid: #1e3a56;
+  --color-border-strong: #2a5278;
+  /* Glow alias retained for translucent cyan hairlines used across panels. */
+  --color-border-glow: rgba(0, 212, 255, 0.13);
+
+  /* Accents */
+  --color-accent-cyan: #00d4ff;
+  --color-accent-green: #00ff88;
+  --color-accent-amber: #ffb800;
+  --color-accent-red: #ff4455;
+  --color-accent-violet: #9d6fff;
+
+  /* Text tiers — primary (hi) → faint (xlo) */
+  --color-text-primary: #e8f4ff;
+  --color-text-muted: #7aa3c8;
+  --color-text-dim: #3a5a7a;
+  --color-text-faint: #1e3352;
+
+  --font-display: "Orbitron", monospace;
+  --font-mono: "Share Tech Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Rajdhani", system-ui, sans-serif;
 
   --shadow-glow-cyan: 0 0 24px rgba(0, 212, 255, 0.25);
-  --shadow-glow-amber: 0 0 24px rgba(255, 149, 0, 0.25);
+  --shadow-glow-amber: 0 0 24px rgba(255, 184, 0, 0.25);
 }
 
 :root {
   color-scheme: dark;
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   color: var(--color-text-primary);
-  background: var(--color-bg-deep);
+  background: var(--color-bg-void);
 }
 
 html,
@@ -37,88 +60,158 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0, 212, 255, 0.08), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(124, 58, 237, 0.06), transparent 60%),
-    var(--color-bg-deep);
+  background: var(--color-bg-void);
+  cursor: crosshair;
+}
+
+/* CRT scanline overlay — fixed, above everything, non-interactive. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Vignette — darkens the corners for the war-room feel. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.65) 100%);
+  pointer-events: none;
+  z-index: 9998;
 }
 
 /* Subtle grid background — pure CSS, no JS cost. */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(0, 212, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 212, 255, 0.05) 1px, transparent 1px);
-  background-size: 48px 48px;
+    linear-gradient(var(--color-border-dim) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-border-dim) 1px, transparent 1px);
+  background-size: 40px 40px;
   background-position: -1px -1px;
 }
 
-/* Scan-line overlay — applied via ::after on the env zone. */
-.scanlines::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.015) 0px,
-    rgba(255, 255, 255, 0.015) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-  mix-blend-mode: screen;
-}
-
+/* Panel surface — the standard framed container. */
 .panel {
-  background: linear-gradient(180deg, rgba(13, 20, 36, 0.85), rgba(13, 20, 36, 0.7));
-  border: 1px solid var(--color-border-glow);
-  backdrop-filter: blur(6px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-dim);
 }
 
-.panel-corner-tl::before,
-.panel-corner-br::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-color: var(--color-accent-cyan);
-}
-.panel-corner-tl::before {
-  top: -1px;
-  left: -1px;
-  border-top: 1px solid var(--color-accent-cyan);
-  border-left: 1px solid var(--color-accent-cyan);
-}
-.panel-corner-br::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 1px solid var(--color-accent-cyan);
-  border-right: 1px solid var(--color-accent-cyan);
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 7px 14px;
+  background: var(--color-bg-panel);
+  border-bottom: 1px solid var(--color-border-dim);
+  flex-shrink: 0;
 }
 
 .text-glow-cyan {
-  text-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+  text-shadow: 0 0 20px var(--color-accent-cyan), 0 0 40px rgba(0, 212, 255, 0.4);
 }
 .text-glow-amber {
-  text-shadow: 0 0 8px rgba(255, 149, 0, 0.6);
+  text-shadow: 0 0 8px rgba(255, 184, 0, 0.6);
 }
 
-@keyframes pulse-soft {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+/* Animated cyan sweep used under the header bar. */
+@keyframes scan-h {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.scan-sweep::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent-cyan), transparent);
+  animation: scan-h 8s linear infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 .animate-pulse-soft {
-  animation: pulse-soft 2.4s ease-in-out infinite;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+.animate-pulse-fast {
+  animation: pulse-dot 0.6s ease-in-out infinite;
 }
 
-@keyframes drift {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(2px, -2px); }
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
-.animate-drift {
-  animation: drift 8s ease-in-out infinite;
+.animate-blink {
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: spin 12s linear infinite;
+}
+.animate-spin-slower {
+  animation: spin 20s linear infinite reverse;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.2s ease;
+}
+
+/* Boot sequence overlay — fades itself out after the intro lines play. */
+@keyframes boot-fade {
+  to {
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+  }
+}
+@keyframes boot-line {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Prism token colors — Delphi palette. */
@@ -131,7 +224,7 @@ body {
 .token.number,
 .token.constant,
 .token.symbol,
-.token.deleted { color: #ff9500; }
+.token.deleted { color: #ffb800; }
 .token.selector,
 .token.attr-name,
 .token.string,
@@ -146,20 +239,20 @@ body {
 .token.attr-value,
 .token.function,
 .token.class-name,
-.token.keyword { color: #7c3aed; }
+.token.keyword { color: #9d6fff; }
 .token.regex,
 .token.important { color: #ff6b9d; }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 3px;
+  height: 3px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 212, 255, 0.15);
-  border-radius: 4px;
+  background: var(--color-border-strong);
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 212, 255, 0.3);

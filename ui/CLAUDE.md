@@ -7,13 +7,27 @@
 
 ## Vision
 
-Delphi doesn't live in a chat box — Delphi **inhabits an environment**. Three zones:
+Delphi doesn't live in a chat box — Delphi **inhabits a mission-control
+console**. The full-mode shell is a four-region grid (ported from
+`delphi_mission_control.html`):
 
-- **Environment** — canvas where Delphi exists, moves, thinks (majority of screen)
-- **Preview Box** — what Delphi is currently building or reading
-- **Chat Rail** — how you talk to Delphi
+- **Header** — identity, deployment facts (node/protocol/uplink), live status
+  dot + session clock; a cyan scan-sweep runs under it
+- **Output Canvas** — the grid backdrop where Delphi renders; shows the
+  directive-pushed preview (code/document) or the rotating "AWAITING" glyph
+- **COMMS (Chat Rail)** — how you talk to Delphi
+- **Sidebar** — STATUS / MEMORY / TELEMETRY / TOKENS / TASK LOG telemetry rail
+- **Footer** — keyboard legend + active model badge
 
-Aesthetic: dark holographic war room. Cyan/amber/violet on near-black. Everything glows slightly. Nothing is static.
+Aesthetic: dark holographic war room. Cyan/green/amber/violet on near-black,
+CRT scanlines + corner vignette, crosshair cursor, a cold-start boot sequence.
+Everything glows slightly. Nothing is static.
+
+> **Telemetry honesty.** Readouts are sourced from real state where one
+> exists — UPLINK = real TTFT, STREAM = real tokens/sec, MEMORY/TOKENS =
+> ≈4 chars/token estimates (the OpenAI-shaped stream carries no usage
+> mid-flight), TASK LOG = real stream events. SIGNAL is an explicitly
+> decorative ambient oscillator, **not** host CPU.
 
 ---
 
@@ -21,13 +35,37 @@ Aesthetic: dark holographic war room. Cyan/amber/violet on near-black. Everythin
 
 | Layer | Choice | Reason |
 |---|---|---|
-| Framework | React 19 + Vite 7 | Fast dev, HMR, project standard |
+| Framework | React 19 + Vite 8 | Fast dev, HMR, project standard |
 | Styling | Tailwind v4 + CSS variables | v4 via `@tailwindcss/vite` — no config file, theme in CSS |
-| Animation | Framer Motion | Panel transitions, mode badges |
-| Canvas | (planned) p5.js or Three.js | Phase 4 particle field + avatar node |
-| Syntax | Prism.js | Code preview rendering |
+| Type | Orbitron (display) · Share Tech Mono (mono) · Rajdhani (sans) | mission-control type system |
+| Canvas | CSS grid + scanlines (Phase 4: p5/Three for particle field) | OutputCanvas backdrop |
+| Syntax | Prism.js | Code preview rendering inside OutputCanvas |
 | Streaming | Native `fetch` + SSE parsing | Same shape as Delphi's `/v1/chat/completions` |
-| State | Zustand | Chat history, Delphi mode, preview content |
+| State | Zustand | Chat history, Delphi mode, preview, events, telemetry |
+
+`framer-motion` is still a dependency but the mission-control shell uses CSS
+keyframes (in `index.css`) for its motion; reach for Framer only if a
+transition outgrows CSS.
+
+### Component map
+
+```
+App.jsx                       ← adaptive shell: compact / landscape / full grids
+├── BootOverlay/              ← cold-start intro, self-unmounts
+├── Header/                   ← logo, node/protocol/uplink, status dot, clock
+├── OutputCanvas/             ← grid backdrop; preview (Prism) or AWAITING glyph
+├── ChatRail/                 ← COMMS panel
+│   ├── MessageBubble.jsx
+│   └── InputBar.jsx          ← listens for `delphi:focus-input` (⌘K)
+├── Sidebar/                  ← STATUS / MEMORY / TELEMETRY / TOKENS / TASK LOG
+├── Footer/                   ← keyboard legend + model badge
+└── CompactBar/               ← phone/tiny status strip
+
+hooks/  useDelphiStream (SSE + directive parser, exports cancelDelphiStream),
+        useViewport, useSessionClock
+store/  chatStore (history/streaming), delphiStore (mode/preview/events/telemetry)
+lib/    modes.js (MODE_COLOR, token estimates)
+```
 
 ---
 
@@ -53,9 +91,9 @@ of three layout modes:
 |-----------|-------------------------------|-------------|------------------------------------------------------------------------|
 | `tiny`    | w<480 OR h<320 (Pi HAT, etc.) | compact     | CompactHUD strip + ChatRail                                            |
 | `phone`   | w<640, h≥320 (handset)        | compact     | CompactHUD strip + ChatRail                                            |
-| `pi`      | 640≤w<960, h<540 (Pi 7", car) | landscape   | TitleBar + PreviewBox + ChatRail; mode pill in canvas corner           |
-| `laptop`  | 960≤w<1440                    | full        | Three-zone: TitleBar / PreviewBox on the left, HUD on the right + ChatRail |
-| `desktop` | w≥1440                        | full        | Same three-zone, larger paddings and font sizes                        |
+| `pi`      | 640≤w<960, h<540 (Pi 7", car) | landscape   | Header + OutputCanvas + ChatRail (no sidebar/footer telemetry rail)    |
+| `laptop`  | 960≤w<1440                    | full        | Full shell: Header / (OutputCanvas+ChatRail ‖ Sidebar) / Footer        |
+| `desktop` | w≥1440                        | full        | Same shell, more breathing room                                        |
 
 ### Compact mode (phone, tiny LCD)
 ```
@@ -86,24 +124,26 @@ of three layout modes:
 
 ### Full mode (laptop, desktop)
 ```
-┌─────────────────────────────────────────────────────────┐
-│  ENVIRONMENT (canvas + grid)                            │
-│  ┌─────────────────────┐  ┌────────────────────────┐    │
-│  │  TitleBar           │  │     HUD                │    │
-│  ├─────────────────────┤  │  mode · task · model   │    │
-│  │  PreviewBox         │  │  memory · session      │    │
-│  │                     │  │                        │    │
-│  └─────────────────────┘  └────────────────────────┘    │
-├─────────────────────────────────────────────────────────┤
-│  ChatRail                                               │
-│  > message delphi…                              [SEND]  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ DELPHI v0.2.0 │ NODE │ PROTOCOL │ UPLINK        ●IDLE  SESSION │  ← Header
+├────────────────────────────────────────┬─────────────────────┤
+│  OUTPUT CANVAS (grid + preview/glyph)   │  STATUS             │
+│                                         │  MEMORY             │
+│                                         │  TELEMETRY          │  ← Sidebar
+├─────────────────────────────────────────┤  TOKENS             │
+│  COMMS                                  │  TASK LOG           │
+│  > message delphi…              [SEND]  │                     │
+├────────────────────────────────────────┴─────────────────────┤
+│ ⌘K FOCUS  ESC INTERRUPT  ⌘L CLEAR              ● model-badge  │  ← Footer
+└──────────────────────────────────────────────────────────────┘
 ```
 
-App-level outer grid is `grid-rows-[1fr_auto]` in full/landscape, and
-`grid-rows-[auto_1fr]` in compact (HUD on top, chat fills). Env zone uses
-`grid-cols-[1.5fr_1fr]` in full mode and `grid-cols-1` (stacked) in
-landscape.
+Full-mode outer grid is `grid-template-rows: 38px 1fr 42px` /
+`grid-template-columns: 1fr 280px` with named areas (header / main / sidebar /
+footer). `main` is itself `grid-rows-[1fr_190px]` — OutputCanvas over COMMS.
+Landscape drops the sidebar and footer telemetry; compact is
+`grid-rows-[auto_1fr]` (CompactBar on top, COMMS fills). A 1px
+`--color-border-dim` gap between regions gives the seam-lit panel look.
 
 ### Adding a layout variant
 
@@ -151,12 +191,20 @@ The parser lives in `hooks/useDelphiStream.js`. Tokens are stripped from the cha
 
 ## Phase status
 
-- [x] **Phase 1 — Shell & Layout.** Static four-panel scaffold, color tokens, scan-lines.
-- [x] **Phase 2 — Chat Rail Integration.** Real SSE streaming against `/v1/chat/completions`, message bubbles (user / delphi), typewriter caret, Enter/Shift+Enter, auto-scroll, error surface. Inline-token parser strips `[MODE:…]` / `[TASK:…]` / `[PREVIEW:…]…[/PREVIEW]` from chat text and routes them into `delphiStore` so the HUD and PreviewBox react live.
-- [ ] **Phase 3 — Preview Box.** Three render modes + shimmer state + slide-in (basic Prism rendering is already wired; this phase adds the shimmer + transitions).
-- [ ] **Phase 4 — Environment Canvas.** Particle field + avatar node reacting to mode.
-- [ ] **Phase 5 — HUD & Status System.** Live mode badge, active task, session timer.
-- [ ] **Phase 6 — Polish & Accessibility.** Keyboard shortcuts, responsive, reduced-motion.
+- [x] **Phase 1 — Shell & Layout.** Mission-control four-region grid, color
+  tokens, scanlines + vignette, boot sequence.
+- [x] **Phase 2 — COMMS Integration.** Real SSE streaming against
+  `/v1/chat/completions`, message bubbles (user / delphi), caret, Enter/Shift+Enter,
+  auto-scroll, error surface. Inline-token parser strips `[MODE:…]` / `[TASK:…]` /
+  `[PREVIEW:…]…[/PREVIEW]` and routes them into `delphiStore`.
+- [x] **Phase 3 — Output Canvas.** Preview render (Prism code / document) vs.
+  the rotating AWAITING glyph, driven by the preview directive.
+- [x] **Phase 5 — HUD & Status System.** Live mode badge, active task, session
+  clock, real TTFT / stream-rate telemetry, token estimates, real task-log feed.
+- [x] **Phase 6 — Polish & Accessibility.** ⌘K focus, ⌘L clear, Esc interrupt;
+  adaptive compact/landscape/full; reduced-motion honored.
+- [ ] **Phase 4 — Living canvas.** Replace the static grid backdrop with a
+  particle field / avatar node that reacts to `delphiStore.mode` (p5/Three).
 
 ---
 

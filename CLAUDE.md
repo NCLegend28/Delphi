@@ -609,6 +609,21 @@ date, decision, rationale.
   a tool-capable `DELPHI_MODEL_VAULT_QUERY`; if the model ignores the tools the
   answer flows through ungrounded. Still **not** a vector DB — the embedding
   sidecar future hook remains the upgrade path for semantic recall.
+- **2026-05-25** — **UI reskinned to "Mission Control."** The three-zone JARVIS
+  shell (`EnvironmentCanvas` + `PreviewBox` + `HUD`) was replaced by a
+  four-region mission-control console (Header / OutputCanvas / COMMS / Sidebar +
+  Footer), ported from a `delphi_mission_control.html` design mockup into the
+  React app. Rationale: the mockup is a denser, more legible war-room surface
+  (live status dot, telemetry rail, task-log feed, boot sequence) than the
+  previous floating-panel layout. **What was preserved:** the entire backend
+  contract — `useDelphiStream`'s SSE + `[MODE]/[TASK]/[PREVIEW]` directive
+  parser, `chatStore`/`delphiStore`, bearer auth, `x-client-id: delphi-ui`, and
+  the adaptive viewport tiers. **What was discarded:** the mockup's
+  direct-to-`api.anthropic.com` fetch and its simulated character-by-character
+  streaming — the UI remains a pure OpenAI-compatible client of *this* service.
+  Telemetry is real where it can be (TTFT, stream t/s, token estimates, event
+  feed); the SIGNAL bar is explicitly decorative. No backend or multi-tenancy
+  change. See `ui/CLAUDE.md` for the component map.
 
 ---
 

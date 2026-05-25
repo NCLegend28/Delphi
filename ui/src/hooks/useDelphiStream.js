@@ -1,9 +1,19 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { useChatStore } from "../store/chatStore";
 import { useDelphiStore } from "../store/delphiStore";
 
 const TOKEN = import.meta.env.VITE_DELPHI_BEARER_TOKEN ?? "";
 const BASE = import.meta.env.VITE_DELPHI_BASE_URL ?? "";
+
+// Module-level handle to the in-flight request's AbortController. Kept here
+// (not per-hook) so a global shortcut — ESC in App — can interrupt the stream
+// regardless of which component instance started it.
+let activeController = null;
+
+/** Abort the in-flight Delphi request, if any. Safe to call when idle. */
+export function cancelDelphiStream() {
+  activeController?.abort();
+}
 
 /**
  * useDelphiStream — the only path through which the UI talks to Delphi.
@@ -31,8 +41,6 @@ const BASE = import.meta.env.VITE_DELPHI_BASE_URL ?? "";
  * sure they are not.
  */
 export function useDelphiStream() {
-  const abortRef = useRef(null);
-
   const send = useCallback(async (text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -45,6 +53,11 @@ export function useDelphiStream() {
     delphi.setActiveTask(null);
     delphi.setError(null);
     delphi.setMode("THINKING");
+    delphi.beginStream();
+    delphi.pushEvent(
+      `Query received: "${trimmed.slice(0, 44)}${trimmed.length > 44 ? "…" : ""}"`,
+    );
+    delphi.pushEvent("Dispatching to inference engine…");
 
     const history = useChatStore.getState().messages.map((m) => ({
       role: m.role,
@@ -64,7 +77,8 @@ export function useDelphiStream() {
     };
 
     const controller = new AbortController();
-    abortRef.current = controller;
+    activeController = controller;
+    const requestStart = performance.now();
 
     try {
       const resp = await fetch(`${BASE}/v1/chat/completions`, {
@@ -95,30 +109,37 @@ export function useDelphiStream() {
       const parser = createTokenParser(ensureAssistantStarted);
 
       let sseBuffer = "";
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
+      for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         sseBuffer += decoder.decode(value, { stream: true });
-        sseBuffer = drainSse(sseBuffer, (chunk) => parser.feed(chunk));
+        sseBuffer = drainSse(sseBuffer, (chunk) => {
+          // Telemetry: TTFT on the first byte, running char count for t/s.
+          delphi.setTtft(performance.now() - requestStart);
+          delphi.recordStreamChars(chunk.length);
+          parser.feed(chunk);
+        });
       }
       parser.flush();
       delphi.setMode("IDLE");
+      delphi.pushEvent("Response complete");
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (err.name === "AbortError") {
+        delphi.pushEvent("Request interrupted by operator");
+        return;
+      }
       const msg = err.message || String(err);
       chat.setError(msg);
       delphi.setError(msg);
       delphi.setMode("IDLE");
+      delphi.pushEvent(`FAULT: ${msg.slice(0, 60)}`);
     } finally {
       useChatStore.getState().endStreaming();
-      abortRef.current = null;
+      activeController = null;
     }
   }, []);
 
-  const cancel = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+  const cancel = useCallback(() => cancelDelphiStream(), []);
 
   return { send, cancel };
 }

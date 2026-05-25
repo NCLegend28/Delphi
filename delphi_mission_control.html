@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DELPHI — Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-void:     #020408;
+    --bg-deep:     #060c14;
+    --bg-surface:  #0b1523;
+    --bg-panel:    #0e1c2e;
+    --bg-raised:   #122030;
+    --border-dim:  #1a2f47;
+    --border-mid:  #1e3a56;
+    --border-hi:   #2a5278;
+    --cyan:        #00d4ff;
+    --cyan-dim:    #005f7a;
+    --cyan-glow:   rgba(0,212,255,0.12);
+    --cyan-glow2:  rgba(0,212,255,0.05);
+    --green:       #00ff88;
+    --green-dim:   #004d2a;
+    --amber:       #ffb800;
+    --amber-dim:   #4d3700;
+    --red:         #ff4455;
+    --red-dim:     #4d0d14;
+    --violet:      #9d6fff;
+    --text-hi:     #e8f4ff;
+    --text-mid:    #7aa3c8;
+    --text-lo:     #3a5a7a;
+    --text-xlo:    #1e3352;
+    --font-display: 'Orbitron', monospace;
+    --font-mono:    'Share Tech Mono', monospace;
+    --font-ui:      'Rajdhani', sans-serif;
+    --scan-speed: 8s;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-void);
+    color: var(--text-hi);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    cursor: crosshair;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Grid noise vignette */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.65) 100%);
+    pointer-events: none;
+    z-index: 9998;
+  }
+
+  /* ── LAYOUT ─────────────────────────────────────── */
+  .shell {
+    position: fixed; inset: 0;
+    display: grid;
+    grid-template-rows: 38px 1fr 42px;
+    grid-template-columns: 1fr 280px;
+    grid-template-areas:
+      "header  header"
+      "main    sidebar"
+      "footer  footer";
+    gap: 1px;
+    background: var(--border-dim);
+    padding: 1px;
+  }
+
+  /* ── HEADER ─────────────────────────────────────── */
+  .header {
+    grid-area: header;
+    background: var(--bg-deep);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 20px;
+    border-bottom: 1px solid var(--border-mid);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    animation: scanh var(--scan-speed) linear infinite;
+  }
+
+  @keyframes scanh {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(100%); }
+  }
+
+  .logo {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--cyan);
+    letter-spacing: 0.3em;
+    text-shadow: 0 0 20px var(--cyan), 0 0 40px rgba(0,212,255,0.4);
+    flex-shrink: 0;
+  }
+
+  .logo-sub {
+    font-size: 9px;
+    color: var(--text-lo);
+    letter-spacing: 0.2em;
+    margin-left: 2px;
+    align-self: flex-end;
+    margin-bottom: 3px;
+  }
+
+  .header-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border-mid);
+    flex-shrink: 0;
+  }
+
+  .header-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .header-stat-label { font-size: 8px; color: var(--text-lo); letter-spacing: 0.15em; }
+  .header-stat-val   { font-size: 11px; color: var(--text-mid); letter-spacing: 0.05em; }
+
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-dot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-mid);
+    letter-spacing: 0.12em;
+  }
+  .status-dot::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  .status-dot.idle::before  { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .status-dot.busy::before  { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse-dot 0.6s ease-in-out infinite; }
+  .status-dot.error::before { background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  .session-clock {
+    font-family: var(--font-display);
+    font-size: 11px;
+    color: var(--text-lo);
+    letter-spacing: 0.15em;
+  }
+
+  /* ── MAIN AREA ──────────────────────────────────── */
+  .main {
+    grid-area: main;
+    background: var(--bg-surface);
+    display: grid;
+    grid-template-rows: 1fr 180px;
+    overflow: hidden;
+  }
+
+  /* Preview / Canvas */
+  .preview-panel {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-dim);
+    flex-shrink: 0;
+  }
+  .panel-label {
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--text-lo);
+  }
+  .panel-status {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--text-lo);
+    letter-spacing: 0.1em;
+  }
+  .panel-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--cyan);
+  }
+
+  .preview-canvas {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    background:
+      radial-gradient(ellipse at 30% 40%, rgba(0,212,255,0.03) 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 70%, rgba(157,111,255,0.03) 0%, transparent 50%),
+      var(--bg-surface);
+  }
+
+  /* Grid lines */
+  .preview-canvas::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--border-dim) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border-dim) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.4;
+  }
+
+  .canvas-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    opacity: 0.5;
+    transition: opacity 0.3s;
+  }
+  .canvas-content.has-content { opacity: 1; }
+
+  .awaiting-glyph {
+    width: 48px; height: 48px;
+    border: 1px solid var(--border-hi);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .awaiting-glyph::before {
+    content: '';
+    position: absolute; inset: -6px;
+    border: 1px solid var(--border-dim);
+    border-radius: 50%;
+    animation: spin 12s linear infinite;
+  }
+  .awaiting-glyph::after {
+    content: '';
+    position: absolute; inset: -12px;
+    border: 1px dashed var(--border-dim);
+    border-radius: 50%;
+    animation: spin 20s linear infinite reverse;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .awaiting-inner {
+    width: 8px; height: 8px;
+    background: var(--cyan-dim);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--cyan);
+  }
+
+  .awaiting-text {
+    font-size: 10px;
+    color: var(--text-xlo);
+    letter-spacing: 0.25em;
+  }
+  .awaiting-sub { font-size: 9px; color: var(--text-xlo); letter-spacing: 0.1em; }
+
+  /* Output display area */
+  #output-display {
+    position: relative;
+    z-index: 1;
+    max-width: 680px;
+    width: 100%;
+    padding: 20px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+  #output-display::-webkit-scrollbar { width: 3px; }
+  #output-display::-webkit-scrollbar-track { background: transparent; }
+  #output-display::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  .output-block {
+    background: rgba(11,21,35,0.8);
+    border: 1px solid var(--border-dim);
+    border-left: 2px solid var(--cyan);
+    border-radius: 0 4px 4px 0;
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-mid);
+    font-family: var(--font-mono);
+  }
+  .output-block .output-label {
+    font-size: 8px;
+    color: var(--cyan);
+    letter-spacing: 0.2em;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .output-block .output-text {
+    color: var(--text-hi);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .cursor-blink {
+    display: inline-block;
+    width: 7px; height: 13px;
+    background: var(--cyan);
+    vertical-align: middle;
+    animation: blink 0.9s step-end infinite;
+    margin-left: 1px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* ── CHAT AREA ──────────────────────────────────── */
+  .chat-panel {
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border-dim);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .chat-history::-webkit-scrollbar { width: 3px; }
+  .chat-history::-webkit-scrollbar-track { background: transparent; }
+  .chat-history::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  .chat-msg {
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    animation: fadeUp 0.2s ease;
+  }
+  @keyframes fadeUp {
+    from { opacity:0; transform: translateY(4px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+
+  .chat-msg.user { justify-content: flex-end; }
+  .chat-msg.delphi { justify-content: flex-start; }
+
+  .msg-bubble {
+    max-width: 75%;
+    padding: 6px 12px;
+    border-radius: 2px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .chat-msg.user .msg-bubble {
+    background: rgba(0,212,255,0.08);
+    border: 1px solid var(--cyan-dim);
+    color: var(--text-hi);
+    border-radius: 4px 0 4px 4px;
+  }
+  .chat-msg.delphi .msg-bubble {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-dim);
+    color: var(--text-mid);
+    border-radius: 0 4px 4px 4px;
+  }
+  .msg-tag {
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    color: var(--text-lo);
+    align-self: flex-end;
+    margin-bottom: 2px;
+    flex-shrink: 0;
+  }
+
+  .chat-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-dim);
+    flex-shrink: 0;
+  }
+
+  .chat-prompt-mark {
+    font-size: 12px;
+    color: var(--cyan);
+    flex-shrink: 0;
+    text-shadow: 0 0 8px var(--cyan);
+  }
+
+  #chat-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-hi);
+    caret-color: var(--cyan);
+    letter-spacing: 0.04em;
+  }
+  #chat-input::placeholder { color: var(--text-xlo); }
+  #chat-input:disabled { opacity: 0.4; }
+
+  .send-btn {
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    color: var(--text-mid);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .send-btn:hover:not(:disabled) {
+    background: var(--cyan-glow);
+    border-color: var(--cyan);
+    color: var(--cyan);
+    box-shadow: 0 0 12px var(--cyan-glow);
+  }
+  .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ── SIDEBAR ────────────────────────────────────── */
+  .sidebar {
+    grid-area: sidebar;
+    background: var(--bg-panel);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid var(--border-dim);
+  }
+
+  .sidebar-section {
+    border-bottom: 1px solid var(--border-dim);
+    padding: 10px 14px;
+    flex-shrink: 0;
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .section-title {
+    font-size: 8px;
+    letter-spacing: 0.25em;
+    color: var(--text-lo);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-dim);
+  }
+
+  /* Status rows */
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+  }
+  .status-key   { font-size: 9px; color: var(--text-lo); letter-spacing: 0.1em; }
+  .status-val   { font-size: 10px; color: var(--text-mid); letter-spacing: 0.05em; }
+  .status-val.active { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
+  .status-val.warn   { color: var(--amber); }
+  .status-val.error  { color: var(--red); }
+  .status-val.ok     { color: var(--green); }
+
+  /* Memory bar */
+  .mem-bar-wrap { margin-top: 4px; }
+  .mem-bar-track {
+    width: 100%;
+    height: 3px;
+    background: var(--border-dim);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .mem-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    border-radius: 2px;
+    transition: width 1s ease;
+    box-shadow: 0 0 6px rgba(0,212,255,0.5);
+  }
+  .mem-bar-labels {
+    display: flex;
+    justify-content: space-between;
+  }
+  .mem-label { font-size: 8px; color: var(--text-lo); }
+
+  /* Telemetry sparkline */
+  .telemetry-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .telem-name { font-size: 9px; color: var(--text-lo); letter-spacing: 0.08em; min-width: 60px; }
+  .telem-bar {
+    flex: 1;
+    height: 2px;
+    background: var(--border-dim);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .telem-fill {
+    height: 100%;
+    border-radius: 1px;
+    transition: width 0.8s ease;
+  }
+  .telem-val { font-size: 9px; color: var(--text-mid); min-width: 32px; text-align: right; }
+
+  /* Task feed */
+  .task-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .task-feed::-webkit-scrollbar { width: 2px; }
+  .task-feed::-webkit-scrollbar-thumb { background: var(--border-hi); }
+
+  .task-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 6px;
+    border-left: 1px solid var(--border-dim);
+    font-size: 9px;
+    color: var(--text-lo);
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    transition: all 0.2s;
+  }
+  .task-item.active {
+    border-left-color: var(--cyan);
+    color: var(--text-mid);
+    background: var(--cyan-glow2);
+  }
+  .task-item.done { border-left-color: var(--green-dim); }
+  .task-ts { font-size: 8px; color: var(--text-xlo); flex-shrink: 0; }
+
+  /* Token counter */
+  .token-display {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .token-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border-dim);
+    border-radius: 2px;
+    padding: 6px 8px;
+  }
+  .token-card-label { font-size: 8px; color: var(--text-lo); margin-bottom: 2px; }
+  .token-card-val   { font-size: 13px; color: var(--text-mid); font-family: var(--font-display); font-weight: 500; letter-spacing: 0.05em; }
+
+  /* ── FOOTER ─────────────────────────────────────── */
+  .footer {
+    grid-area: footer;
+    background: var(--bg-deep);
+    border-top: 1px solid var(--border-dim);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 20px;
+    font-size: 9px;
+    color: var(--text-xlo);
+    letter-spacing: 0.1em;
+  }
+  .footer-item { display: flex; align-items: center; gap: 5px; }
+  .footer-key  { color: var(--border-hi); }
+  .footer-right { margin-left: auto; }
+
+  .model-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(157,111,255,0.06);
+    border: 1px solid rgba(157,111,255,0.2);
+    padding: 3px 10px;
+    border-radius: 2px;
+    font-size: 9px;
+    color: var(--violet);
+    letter-spacing: 0.1em;
+  }
+
+  /* Scroll hint for sidebar */
+  .sidebar-scroll {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .sidebar-scroll::-webkit-scrollbar { width: 2px; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border-dim); }
+
+  /* Error banner */
+  .error-banner {
+    display: none;
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-size: 10px;
+    padding: 6px 14px;
+    letter-spacing: 0.08em;
+  }
+
+  /* Intro boot sequence */
+  .boot-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg-void);
+    z-index: 9000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    animation: bootFade 0.4s ease 2.2s forwards;
+  }
+  @keyframes bootFade {
+    to { opacity: 0; pointer-events: none; visibility: hidden; }
+  }
+  .boot-line {
+    font-size: 11px;
+    color: var(--text-lo);
+    letter-spacing: 0.15em;
+    opacity: 0;
+    animation: bootLine 0.3s ease forwards;
+  }
+  .boot-line:nth-child(1) { animation-delay: 0.1s; }
+  .boot-line:nth-child(2) { animation-delay: 0.4s; }
+  .boot-line:nth-child(3) { animation-delay: 0.7s; }
+  .boot-line:nth-child(4) { animation-delay: 1.0s; color: var(--cyan); text-shadow: 0 0 10px var(--cyan); font-family: var(--font-display); font-size: 20px; letter-spacing: 0.4em; }
+  .boot-line:nth-child(5) { animation-delay: 1.4s; color: var(--green); }
+  @keyframes bootLine {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Boot sequence -->
+<div class="boot-overlay">
+  <div class="boot-line">INITIALIZING DELPHI RUNTIME...</div>
+  <div class="boot-line">LOADING MODEL CONTEXT LAYER...</div>
+  <div class="boot-line">ESTABLISHING SECURE CHANNEL...</div>
+  <div class="boot-line">DELPHI</div>
+  <div class="boot-line">● SYSTEM ONLINE — ALL SYSTEMS NOMINAL</div>
+</div>
+
+<div class="shell">
+
+  <!-- ── HEADER ── -->
+  <header class="header">
+    <span class="logo">DELPHI</span>
+    <span class="logo-sub">V0.2.0</span>
+    <div class="header-divider"></div>
+    <div class="header-stat">
+      <span class="header-stat-label">NODE</span>
+      <span class="header-stat-val">LOCAL</span>
+    </div>
+    <div class="header-divider"></div>
+    <div class="header-stat">
+      <span class="header-stat-label">PROTOCOL</span>
+      <span class="header-stat-val">TAILNET · TLS</span>
+    </div>
+    <div class="header-divider"></div>
+    <div class="header-stat">
+      <span class="header-stat-label">UPLINK</span>
+      <span class="header-stat-val" id="hdr-latency">— ms</span>
+    </div>
+    <div class="header-right">
+      <span class="status-dot idle" id="main-status-dot">IDLE</span>
+      <span class="session-clock" id="session-clock">SESSION 00:00:00</span>
+    </div>
+  </header>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+
+    <!-- Preview / Output Canvas -->
+    <div class="preview-panel">
+      <div class="panel-header">
+        <div class="panel-dot" id="canvas-dot"></div>
+        <span class="panel-label">OUTPUT CANVAS</span>
+        <span class="panel-status" id="canvas-status">IDLE</span>
+      </div>
+      <div class="preview-canvas">
+        <div class="canvas-content" id="canvas-idle">
+          <div class="awaiting-glyph">
+            <div class="awaiting-inner"></div>
+          </div>
+          <span class="awaiting-text">AWAITING</span>
+          <span class="awaiting-sub">Delphi will render output here as it works.</span>
+        </div>
+        <div id="output-display" style="display:none; flex-direction:column; gap:8px; width:100%; max-width:680px; padding:20px; overflow-y:auto; max-height:100%;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-panel">
+      <div class="panel-header">
+        <div class="panel-dot"></div>
+        <span class="panel-label">COMMS</span>
+        <span class="panel-status" id="comms-status">READY</span>
+      </div>
+      <div class="error-banner" id="error-banner"></div>
+      <div class="chat-history" id="chat-history"></div>
+      <div class="chat-input-row">
+        <span class="chat-prompt-mark">&gt;</span>
+        <input id="chat-input" type="text" placeholder="message delphi..." autocomplete="off" spellcheck="false">
+        <button class="send-btn" id="send-btn" onclick="handleSend()">SEND</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar-scroll">
+
+      <!-- Status block -->
+      <div class="sidebar-section">
+        <div class="section-title">STATUS</div>
+        <div class="status-row">
+          <span class="status-key">MODE</span>
+          <span class="status-val active" id="stat-mode">● IDLE</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">TASK</span>
+          <span class="status-val" id="stat-task">no active task</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">MODEL</span>
+          <span class="status-val" id="stat-model">claude-sonnet-4</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">CONTEXT</span>
+          <span class="status-val" id="stat-context">0 turns</span>
+        </div>
+      </div>
+
+      <!-- Memory bar -->
+      <div class="sidebar-section">
+        <div class="section-title">MEMORY</div>
+        <div class="mem-bar-wrap">
+          <div class="mem-bar-track">
+            <div class="mem-bar-fill" id="mem-bar" style="width:5%"></div>
+          </div>
+          <div class="mem-bar-labels">
+            <span class="mem-label" id="mem-used">0 tok</span>
+            <span class="mem-label" id="mem-pct">5%</span>
+            <span class="mem-label">200K ctx</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telemetry -->
+      <div class="sidebar-section">
+        <div class="section-title">TELEMETRY</div>
+        <div class="telemetry-row">
+          <span class="telem-name">CPU</span>
+          <div class="telem-bar"><div class="telem-fill" id="tel-cpu" style="width:18%; background: var(--cyan);"></div></div>
+          <span class="telem-val" id="tel-cpu-v">18%</span>
+        </div>
+        <div class="telemetry-row">
+          <span class="telem-name">LATENCY</span>
+          <div class="telem-bar"><div class="telem-fill" id="tel-lat" style="width:12%; background: var(--green);"></div></div>
+          <span class="telem-val" id="tel-lat-v">240ms</span>
+        </div>
+        <div class="telemetry-row">
+          <span class="telem-name">STREAM</span>
+          <div class="telem-bar"><div class="telem-fill" id="tel-str" style="width:0%; background: var(--violet);"></div></div>
+          <span class="telem-val" id="tel-str-v">0 t/s</span>
+        </div>
+        <div class="telemetry-row">
+          <span class="telem-name">TEMP</span>
+          <div class="telem-bar"><div class="telem-fill" id="tel-temp" style="width:70%; background: var(--amber);"></div></div>
+          <span class="telem-val" id="tel-temp-v">0.7</span>
+        </div>
+      </div>
+
+      <!-- Tokens -->
+      <div class="sidebar-section">
+        <div class="section-title">TOKENS</div>
+        <div class="token-display">
+          <div class="token-card">
+            <div class="token-card-label">INPUT</div>
+            <div class="token-card-val" id="tok-in">0</div>
+          </div>
+          <div class="token-card">
+            <div class="token-card-label">OUTPUT</div>
+            <div class="token-card-val" id="tok-out">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task log -->
+      <div class="sidebar-section">
+        <div class="section-title">TASK LOG</div>
+        <div class="task-feed" id="task-feed">
+          <div class="task-item">
+            <span class="task-ts">00:00</span>
+            <span>DELPHI runtime initialized</span>
+          </div>
+          <div class="task-item">
+            <span class="task-ts">00:00</span>
+            <span>Awaiting operator input</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ── FOOTER ── -->
+  <footer class="footer">
+    <div class="footer-item"><span class="footer-key">⌘K</span> COMMAND</div>
+    <div class="footer-item"><span class="footer-key">ESC</span> INTERRUPT</div>
+    <div class="footer-item"><span class="footer-key">⌘L</span> CLEAR</div>
+    <div class="footer-right">
+      <div class="model-badge" id="model-badge">● claude-sonnet-4-20250514</div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  // ── STATE ──────────────────────────────────────────
+  const state = {
+    messages: [],
+    totalTokensIn: 0,
+    totalTokensOut: 0,
+    isStreaming: false,
+    sessionStart: Date.now(),
+    turnCount: 0,
+    streamTokenCount: 0,
+    streamStartTime: 0
+  };
+
+  // ── SESSION CLOCK ──────────────────────────────────
+  setInterval(() => {
+    const elapsed = Math.floor((Date.now() - state.sessionStart) / 1000);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    document.getElementById('session-clock').textContent = `SESSION ${h}:${m}:${s}`;
+  }, 1000);
+
+  // ── TELEMETRY SIMULATION ───────────────────────────
+  let telInterval = null;
+  function startTelemetry() {
+    if (telInterval) return;
+    telInterval = setInterval(() => {
+      const cpu = 15 + Math.random() * 30;
+      const lat = 200 + Math.random() * 300;
+      setTelem('cpu', cpu, `${Math.round(cpu)}%`);
+      setTelem('lat', Math.min(lat/600*100, 100), `${Math.round(lat)}ms`);
+      document.getElementById('hdr-latency').textContent = `${Math.round(lat)}ms`;
+
+      if (state.isStreaming) {
+        const elapsed = (Date.now() - state.streamStartTime) / 1000;
+        const tps = elapsed > 0 ? Math.round(state.streamTokenCount / elapsed) : 0;
+        setTelem('str', Math.min(tps / 80 * 100, 100), `${tps} t/s`);
+      } else {
+        setTelem('str', 0, '0 t/s');
+      }
+    }, 800);
+  }
+  startTelemetry();
+
+  function setTelem(id, pct, val) {
+    const fill = document.getElementById(`tel-${id}`);
+    const valEl = document.getElementById(`tel-${id}-v`);
+    if (fill) fill.style.width = `${Math.min(pct, 100)}%`;
+    if (valEl) valEl.textContent = val;
+  }
+
+  // ── TASK LOG ───────────────────────────────────────
+  function addTask(text) {
+    const elapsed = Math.floor((Date.now() - state.sessionStart) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    const feed = document.getElementById('task-feed');
+    const item = document.createElement('div');
+    item.className = 'task-item active';
+    item.innerHTML = `<span class="task-ts">${m}:${s}</span><span>${text}</span>`;
+    feed.appendChild(item);
+    setTimeout(() => item.classList.remove('active'), 3000);
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ── STATUS UPDATES ─────────────────────────────────
+  function setStatus(mode) {
+    const dot = document.getElementById('main-status-dot');
+    const statMode = document.getElementById('stat-mode');
+    dot.className = `status-dot ${mode.toLowerCase()}`;
+    if (mode === 'IDLE') {
+      dot.textContent = 'IDLE';
+      statMode.textContent = '● IDLE';
+      statMode.className = 'status-val active';
+      document.getElementById('canvas-status').textContent = 'IDLE';
+      document.getElementById('comms-status').textContent = 'READY';
+      document.getElementById('stat-task').textContent = 'no active task';
+    } else if (mode === 'PROCESSING') {
+      dot.textContent = 'PROCESSING';
+      statMode.textContent = '● PROCESSING';
+      statMode.className = 'status-val warn';
+      document.getElementById('canvas-status').textContent = 'STREAMING';
+      document.getElementById('comms-status').textContent = 'RECEIVING';
+      document.getElementById('stat-task').textContent = 'inference';
+    } else if (mode === 'ERROR') {
+      dot.textContent = 'ERROR';
+      statMode.textContent = '● ERROR';
+      statMode.className = 'status-val error';
+      document.getElementById('stat-task').textContent = 'failed';
+    }
+  }
+
+  // ── MEMORY BAR ────────────────────────────────────
+  function updateMemory(tokensIn, tokensOut) {
+    const total = tokensIn + tokensOut;
+    const maxCtx = 200000;
+    const pct = Math.min((total / maxCtx) * 100, 100).toFixed(1);
+    document.getElementById('mem-bar').style.width = `${pct}%`;
+    document.getElementById('mem-used').textContent = `${total.toLocaleString()} tok`;
+    document.getElementById('mem-pct').textContent = `${pct}%`;
+    document.getElementById('tok-in').textContent = tokensIn.toLocaleString();
+    document.getElementById('tok-out').textContent = tokensOut.toLocaleString();
+    document.getElementById('stat-context').textContent = `${state.turnCount} turns`;
+  }
+
+  // ── CHAT UI ───────────────────────────────────────
+  function appendChatMsg(role, text) {
+    const history = document.getElementById('chat-history');
+    const wrap = document.createElement('div');
+    wrap.className = `chat-msg ${role}`;
+    const tag = role === 'user' ? 'YOU' : 'DELPHI';
+    if (role === 'user') {
+      wrap.innerHTML = `<span class="msg-tag">${tag}</span><div class="msg-bubble">${escHtml(text)}</div>`;
+    } else {
+      wrap.innerHTML = `<div class="msg-bubble"><span id="latest-bubble"></span></div><span class="msg-tag">${tag}</span>`;
+    }
+    history.appendChild(wrap);
+    history.scrollTop = history.scrollHeight;
+    return wrap;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── OUTPUT CANVAS ─────────────────────────────────
+  let currentOutputBlock = null;
+  let currentOutputText = '';
+
+  function showOutputCanvas() {
+    document.getElementById('canvas-idle').style.display = 'none';
+    const od = document.getElementById('output-display');
+    od.style.display = 'flex';
+    const block = document.createElement('div');
+    block.className = 'output-block';
+    block.innerHTML = `<span class="output-label">DELPHI OUTPUT ──</span><span class="output-text" id="live-output-text"></span><span class="cursor-blink" id="live-cursor"></span>`;
+    od.appendChild(block);
+    od.scrollTop = od.scrollHeight;
+    currentOutputBlock = block;
+    currentOutputText = '';
+    return block;
+  }
+
+  function appendToOutput(chunk) {
+    currentOutputText += chunk;
+    const el = document.getElementById('live-output-text');
+    if (el) el.textContent = currentOutputText;
+    const od = document.getElementById('output-display');
+    od.scrollTop = od.scrollHeight;
+  }
+
+  function finalizeOutput() {
+    const cursor = document.getElementById('live-cursor');
+    if (cursor) cursor.remove();
+  }
+
+  // ── SEND & STREAM ─────────────────────────────────
+  async function handleSend() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text || state.isStreaming) return;
+
+    input.value = '';
+    state.isStreaming = true;
+    state.streamTokenCount = 0;
+    state.streamStartTime = Date.now();
+
+    document.getElementById('chat-input').disabled = true;
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('error-banner').style.display = 'none';
+
+    // Add user message
+    appendChatMsg('user', text);
+    state.messages.push({ role: 'user', content: text });
+    state.totalTokensIn += Math.ceil(text.length / 4);
+    state.turnCount++;
+    updateMemory(state.totalTokensIn, state.totalTokensOut);
+
+    // Update status
+    setStatus('PROCESSING');
+    addTask(`User query received: "${text.slice(0, 40)}${text.length > 40 ? '...' : ''}"`);
+    addTask('Dispatching to inference engine...');
+
+    // Prepare output canvas + chat bubble
+    showOutputCanvas();
+    const delphiWrap = appendChatMsg('delphi', '');
+    const bubble = delphiWrap.querySelector('.msg-bubble');
+    bubble.innerHTML = '<span class="cursor-blink"></span>';
+    let fullResponse = '';
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: 'You are Delphi, an advanced AI agent running in a mission control terminal. You are precise, analytical, and slightly technical in tone — like a capable AI co-pilot. Keep responses focused and useful. You can use line breaks but avoid markdown headers or bullet formatting. Speak like an operator, not an assistant.',
+          messages: state.messages
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error?.message || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.content?.[0]?.text || '';
+      fullResponse = content;
+
+      // Simulate streaming the response character by character for the terminal feel
+      bubble.innerHTML = '';
+      const chatSpan = document.createElement('span');
+      bubble.appendChild(chatSpan);
+
+      let i = 0;
+      const chunkSize = 3;
+      const delay = 18;
+
+      await new Promise(resolve => {
+        function streamChunk() {
+          if (i >= fullResponse.length) {
+            resolve();
+            return;
+          }
+          const chunk = fullResponse.slice(i, i + chunkSize);
+          chatSpan.textContent += chunk;
+          appendToOutput(chunk);
+          state.streamTokenCount += Math.ceil(chunk.length / 4);
+          i += chunkSize;
+          const history = document.getElementById('chat-history');
+          history.scrollTop = history.scrollHeight;
+          setTimeout(streamChunk, delay);
+        }
+        streamChunk();
+      });
+
+      // Token tracking from actual usage
+      if (data.usage) {
+        state.totalTokensIn = (state.totalTokensIn || 0) + (data.usage.input_tokens || 0);
+        state.totalTokensOut = (state.totalTokensOut || 0) + (data.usage.output_tokens || 0);
+      } else {
+        state.totalTokensOut += Math.ceil(fullResponse.length / 4);
+      }
+
+      state.messages.push({ role: 'assistant', content: fullResponse });
+      finalizeOutput();
+      addTask('Response complete');
+      setStatus('IDLE');
+      updateMemory(state.totalTokensIn, state.totalTokensOut);
+
+    } catch (err) {
+      console.error(err);
+      const errBanner = document.getElementById('error-banner');
+      errBanner.style.display = 'block';
+      errBanner.textContent = `FAULT: ${err.message}`;
+      bubble.innerHTML = `<span style="color:var(--red);font-size:10px">TRANSMISSION FAILURE — ${err.message}</span>`;
+      finalizeOutput();
+      setStatus('ERROR');
+      addTask(`ERROR: ${err.message.slice(0,50)}`);
+    }
+
+    state.isStreaming = false;
+    document.getElementById('chat-input').disabled = false;
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('chat-input').focus();
+  }
+
+  // ── KEYBOARD SHORTCUTS ────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.activeElement === document.getElementById('chat-input')) {
+      handleSend();
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
+      e.preventDefault();
+      clearSession();
+    }
+    if (e.key === 'Escape' && state.isStreaming) {
+      // Interrupt — just UI feedback since we can't cancel the fetch in flight easily
+      addTask('INTERRUPT signal received');
+    }
+  });
+
+  function clearSession() {
+    state.messages = [];
+    state.totalTokensIn = 0;
+    state.totalTokensOut = 0;
+    state.turnCount = 0;
+    document.getElementById('chat-history').innerHTML = '';
+    document.getElementById('output-display').innerHTML = '';
+    document.getElementById('output-display').style.display = 'none';
+    document.getElementById('canvas-idle').style.display = 'flex';
+    document.getElementById('task-feed').innerHTML = '';
+    updateMemory(0, 0);
+    setStatus('IDLE');
+    addTask('Session cleared by operator');
+    addTask('Awaiting new query');
+  }
+
+  // ── INIT ──────────────────────────────────────────
+  document.getElementById('chat-input').focus();
+  updateMemory(0, 0);
+</script>
+
+</body>
+</html>

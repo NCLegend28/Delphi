@@ -1,19 +1,26 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../store/chatStore";
 
 /**
- * InputBar — textarea + send button.
+ * InputBar — prompt mark + auto-growing textarea + SEND.
  *
  *   Enter         → send (calls onSubmit)
- *   Shift+Enter   → newline (default textarea behavior)
- *   Esc           → blur (lets keyboard shortcuts re-take focus)
+ *   Shift+Enter   → newline
+ *   Esc           → blur
  *
- * Auto-grows up to ~6 lines, then scrolls internally.
+ * Listens for the window `delphi:focus-input` event (dispatched by the ⌘K
+ * shortcut in App) so the operator can jump to the prompt from anywhere.
  */
 export function InputBar({ onSubmit }) {
   const [value, setValue] = useState("");
   const taRef = useRef(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
+
+  useEffect(() => {
+    const focus = () => taRef.current?.focus();
+    window.addEventListener("delphi:focus-input", focus);
+    return () => window.removeEventListener("delphi:focus-input", focus);
+  }, []);
 
   const submit = () => {
     const text = value.trim();
@@ -39,15 +46,13 @@ export function InputBar({ onSubmit }) {
 
   return (
     <form
-      className="flex items-end gap-2 border-t border-[var(--color-border-glow)] px-3 py-2"
+      className="flex items-center gap-2 border-t border-[var(--color-border-dim)] px-3.5 py-2"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
     >
-      <span className="pb-1 font-mono text-xs text-[var(--color-accent-cyan)] text-glow-cyan">
-        &gt;
-      </span>
+      <span className="shrink-0 text-xs text-[var(--color-accent-cyan)] text-glow-cyan">&gt;</span>
       <textarea
         ref={taRef}
         rows={1}
@@ -56,12 +61,14 @@ export function InputBar({ onSubmit }) {
         onKeyDown={onKeyDown}
         placeholder={isStreaming ? "delphi is responding…" : "message delphi…"}
         disabled={isStreaming}
-        className="max-h-40 flex-1 resize-none bg-transparent font-mono text-sm leading-relaxed text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none disabled:opacity-50"
+        autoComplete="off"
+        spellCheck={false}
+        className="max-h-32 flex-1 resize-none bg-transparent text-xs leading-relaxed tracking-[0.04em] text-[var(--color-text-primary)] caret-[var(--color-accent-cyan)] placeholder:text-[var(--color-text-faint)] focus:outline-none disabled:opacity-40"
       />
       <button
         type="submit"
         disabled={isStreaming || !value.trim()}
-        className="rounded-sm border border-[var(--color-border-strong)] px-3 py-1 font-display text-[10px] tracking-[0.3em] text-[var(--color-accent-cyan)] transition hover:bg-[var(--color-accent-cyan)]/10 hover:shadow-[var(--shadow-glow-cyan)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none"
+        className="shrink-0 border border-[var(--color-border-strong)] px-3 py-[5px] text-[9px] tracking-[0.2em] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent-cyan)] hover:bg-[var(--color-accent-cyan)]/10 hover:text-[var(--color-accent-cyan)] hover:shadow-[var(--shadow-glow-cyan)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-[var(--color-border-strong)] disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-muted)] disabled:hover:shadow-none"
       >
         SEND
       </button>
@@ -72,7 +79,6 @@ export function InputBar({ onSubmit }) {
 function autosize(el, value) {
   if (!el) return;
   el.style.height = "auto";
-  // Use scrollHeight to fit content; cap is enforced by max-h-40 in CSS.
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
   if (!value) el.style.height = "";
 }
