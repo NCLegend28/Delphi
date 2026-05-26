@@ -13,8 +13,10 @@ console**. The full-mode shell is a four-region grid (ported from
 
 - **Header** — identity, deployment facts (node/protocol/uplink), live status
   dot + session clock; a cyan scan-sweep runs under it
-- **Output Canvas** — the grid backdrop where Delphi renders; shows the
-  directive-pushed preview (code/document) or the rotating "AWAITING" glyph
+- **Output Canvas** — the live render surface: mirrors the current exchange
+  (your QUERY + Delphi's streaming OUTPUT, fed by the same SSE deltas as COMMS),
+  with directive-pushed previews (code/document) rendered below; the rotating
+  "AWAITING" glyph is the empty state
 - **COMMS (Chat Rail)** — how you talk to Delphi
 - **Sidebar** — STATUS / MEMORY / TELEMETRY / TOKENS / TASK LOG telemetry rail
 - **Footer** — keyboard legend + active model badge
@@ -53,7 +55,7 @@ transition outgrows CSS.
 App.jsx                       ← adaptive shell: compact / landscape / full grids
 ├── BootOverlay/              ← cold-start intro, self-unmounts
 ├── Header/                   ← logo, node/protocol/uplink, status dot, clock
-├── OutputCanvas/             ← grid backdrop; preview (Prism) or AWAITING glyph
+├── OutputCanvas/             ← live exchange mirror (QUERY + OUTPUT) + preview (Prism); AWAITING glyph empty state
 ├── ChatRail/                 ← COMMS panel
 │   ├── MessageBubble.jsx
 │   └── InputBar.jsx          ← listens for `delphi:focus-input` (⌘K)
@@ -197,8 +199,9 @@ The parser lives in `hooks/useDelphiStream.js`. Tokens are stripped from the cha
   `/v1/chat/completions`, message bubbles (user / delphi), caret, Enter/Shift+Enter,
   auto-scroll, error surface. Inline-token parser strips `[MODE:…]` / `[TASK:…]` /
   `[PREVIEW:…]…[/PREVIEW]` and routes them into `delphiStore`.
-- [x] **Phase 3 — Output Canvas.** Preview render (Prism code / document) vs.
-  the rotating AWAITING glyph, driven by the preview directive.
+- [x] **Phase 3 — Output Canvas.** Live exchange mirror — QUERY + Delphi's
+  streaming OUTPUT drawn from the same SSE deltas as COMMS — plus directive
+  previews (Prism code / document) and the AWAITING glyph empty state.
 - [x] **Phase 5 — HUD & Status System.** Live mode badge, active task, session
   clock, real TTFT / stream-rate telemetry, token estimates, real task-log feed.
 - [x] **Phase 6 — Polish & Accessibility.** ⌘K focus, ⌘L clear, Esc interrupt;
