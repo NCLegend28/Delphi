@@ -27,6 +27,26 @@ import { uid } from "../lib/uid";
  *   streamChars   characters streamed in the current request (real)
  *   streamStartedAt  perf timestamp of first streamed byte (real, for t/s)
  */
+const AUTO_SPEAK_KEY = "delphi:autoSpeak";
+
+function readAutoSpeak() {
+  if (typeof window === "undefined" || !window.localStorage) return false;
+  try {
+    return window.localStorage.getItem(AUTO_SPEAK_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoSpeak(v) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(AUTO_SPEAK_KEY, v ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 const INITIAL_STATE = {
   mode: "IDLE",
   activeTask: null,
@@ -43,6 +63,12 @@ const MAX_EVENTS = 60;
 
 export const useDelphiStore = create((set) => ({
   ...INITIAL_STATE,
+  autoSpeakEnabled: readAutoSpeak(),
+  setAutoSpeak: (v) => {
+    const next = !!v;
+    writeAutoSpeak(next);
+    set({ autoSpeakEnabled: next });
+  },
 
   setMode: (mode) => set({ mode }),
   setActiveTask: (activeTask) => set({ activeTask }),

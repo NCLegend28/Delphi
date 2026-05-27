@@ -1,6 +1,22 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MessageBubble } from "./MessageBubble";
+
+beforeEach(() => {
+  window.speechSynthesis = {
+    cancel: vi.fn(),
+    speak: vi.fn(),
+    speaking: false,
+  };
+  window.SpeechSynthesisUtterance = function (t) {
+    this.text = t;
+  };
+});
+
+afterEach(() => {
+  delete window.speechSynthesis;
+  delete window.SpeechSynthesisUtterance;
+});
 
 describe("MessageBubble", () => {
   it("renders plain user text", () => {
@@ -60,5 +76,23 @@ describe("MessageBubble", () => {
       />,
     );
     expect(screen.queryByTestId("bubble-thumbs")).not.toBeInTheDocument();
+  });
+
+  it("shows SPEAK button for non-streaming assistant bubble with text", () => {
+    render(<MessageBubble role="assistant" content="hello operator" />);
+    const btn = screen.getByRole("button", { name: /speak response/i });
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show SPEAK while assistant bubble is streaming", () => {
+    render(<MessageBubble role="assistant" content="partial..." streaming />);
+    expect(screen.queryByRole("button", { name: /speak response/i })).toBeNull();
+  });
+
+  it("does not show SPEAK on user bubbles", () => {
+    render(<MessageBubble role="user" content="hi" />);
+    expect(screen.queryByRole("button", { name: /speak response/i })).toBeNull();
   });
 });

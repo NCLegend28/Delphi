@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useChatStore } from "../store/chatStore";
 import { useDelphiStore } from "../store/delphiStore";
+import { speak as speechSpeak, stop as speechStop } from "../lib/speech";
 
 const TOKEN = import.meta.env.VITE_DELPHI_BEARER_TOKEN ?? "";
 const BASE = import.meta.env.VITE_DELPHI_BASE_URL ?? "";
@@ -92,6 +93,8 @@ export function useDelphiStream() {
     delphi.setError(null);
     delphi.setMode("THINKING");
     delphi.beginStream();
+    // A new request always interrupts any in-flight spoken response.
+    speechStop();
     const label = trimmed || `[${images.length} image${images.length > 1 ? "s" : ""}]`;
     delphi.pushEvent(
       `Query received: "${label.slice(0, 44)}${label.length > 44 ? "…" : ""}"`,
@@ -164,6 +167,15 @@ export function useDelphiStream() {
       parser.flush();
       delphi.setMode("IDLE");
       delphi.pushEvent("Response complete");
+      // Autoplay: only after the stream completes — never mid-delta. The
+      // assistant bubble may not exist if the stream never produced text.
+      if (useDelphiStore.getState().autoSpeakEnabled && assistantStarted) {
+        const { streamingId, messages } = useChatStore.getState();
+        const msg = messages.find((m) => m.id === streamingId);
+        if (msg && typeof msg.content === "string" && msg.content.trim()) {
+          speechSpeak(msg.content);
+        }
+      }
     } catch (err) {
       if (err.name === "AbortError") {
         delphi.pushEvent("Request interrupted by operator");
