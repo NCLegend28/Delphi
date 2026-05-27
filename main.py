@@ -27,6 +27,7 @@ from typing import Annotated, Any
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 
+from api.audio import router as audio_router
 from api.chat import router as chat_router
 from api.deps import get_metrics, get_ollama, get_roster
 from auth.bearer import require_bearer
@@ -113,6 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Delphi", version="0.1.0", lifespan=lifespan)
 app.include_router(chat_router)
+app.include_router(audio_router)
 
 
 # --- public liveness ------------------------------------------------------

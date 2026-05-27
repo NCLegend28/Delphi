@@ -88,6 +88,18 @@ class Config(BaseSettings):
     host: str = Field(default="0.0.0.0", validation_alias="DELPHI_HOST")
     port: int = Field(default=8090, validation_alias="DELPHI_PORT")
 
+    # --- Speech-to-text ---
+    # POST /v1/audio/transcriptions. Provider selection is config-driven so
+    # we can swap faster-whisper for a hosted OpenAI Whisper endpoint without
+    # touching the route. ``model`` and ``max_duration_seconds`` are advisory
+    # — provider impls may ignore them.
+    speech_to_text_enabled: bool = True
+    speech_to_text_provider: str = "faster-whisper"
+    speech_to_text_model: str = "base"
+    speech_to_text_max_upload_bytes: int = 25 * 1024 * 1024
+    speech_to_text_max_duration_seconds: int | None = None
+
+
     @field_validator("obsidian_vault_path", "log_dir")
     @classmethod
     def _expand_user(cls, v: str) -> str:
