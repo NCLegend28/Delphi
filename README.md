@@ -120,6 +120,60 @@ your other machines — that's out of this stack's scope.
 The same code still runs the local single-process way (`uv run python main.py`)
 with `WORKER_ENABLED` unset and a local `OLLAMA_BASE_URL`.
 
+## Voice & Vision
+
+Delphi accepts image attachments and microphone input from the UI, and can
+speak responses back through the browser. The backend is OpenAI-compatible
+on both axes (chat content arrays + `/v1/audio/transcriptions`) so other
+clients can reuse the same wires.
+
+**Vision (images in chat).** Any chat model that accepts OpenAI-style
+multimodal `content` arrays (parts of `{type:"text"}` and
+`{type:"image_url"}`) works. Local-friendly options on Ollama include
+`llama3.2-vision` and `qwen2-vl`; point `DELPHI_MODEL_CHAT` (or whichever
+roster slot you route to) at one of those before attaching images. The UI
+normalizes uploads client-side before they hit the wire — `ui/src/lib/
+attachments.js` caps the longest edge at **1568px** and re-encodes to
+**JPEG quality ≈ 0.85**, so 10 MB phone photos shrink to roughly one screen
+of base64 instead of pummeling the proxy. The vault note for the exchange
+records the image as `[image attachment]` placeholder text — no base64
+ever lands in `requests.jsonl` or the Obsidian note.
+
+**Voice input (microphone → text).** The UI's 🎙 button records a short
+clip via `MediaRecorder` and POSTs it to
+`POST /v1/audio/transcriptions` (multipart `file=…`). The default backend
+is **faster-whisper running locally**, model `base`, configured via:
+
+```
+SPEECH_TO_TEXT_ENABLED=true        # set false → endpoint returns 503
+SPEECH_TO_TEXT_PROVIDER=faster-whisper
+SPEECH_TO_TEXT_MODEL=base          # tiny | base | small | medium | large-v3
+SPEECH_TO_TEXT_MAX_UPLOAD_BYTES=26214400   # 25 MiB, matches OpenAI
+# SPEECH_TO_TEXT_MAX_DURATION_SECONDS=600  # optional duration cap
+```
+
+The model is **lazy-downloaded on first request** (~140 MB for `base`),
+so the first transcription after a fresh deploy can take 10–60 s while
+the weights pull; subsequent calls are sub-second on CPU for short clips.
+The transcript fills the chat textarea so you can edit before sending —
+nothing is sent without an explicit press.
+
+**Voice output (text → speech).** Browser **`SpeechSynthesis`** only —
+there is no server-side TTS yet. The chat rail exposes an AUTO-SPEAK
+toggle (off by default) and per-message SPEAK / STOP buttons; canceling
+a mid-stream response also stops any in-flight speech. A future hosted-TTS
+seam will land at `api/speech.py` mirroring the `audio.py` shape, but
+nothing in the current backend speaks.
+
+**Browser permissions.** Microphone access is requested on the first 🎙
+press; if the user denies it, the recorder flips to a `denied` status and
+the button stays disabled until permissions are re-granted. Image
+attachment uses a plain `<input type="file">` and needs no permission.
+Live camera capture is **not** implemented — only file picker uploads.
+`MediaRecorder` requires a secure context (`https://` or `localhost`) on
+non-localhost hosts; see `ui/README.md` for the same caveat that already
+applies to `crypto.randomUUID`.
+
 ## Status
 
 End-to-end: auth → resolver → soul → proxy → vault (with entity wikilinks
