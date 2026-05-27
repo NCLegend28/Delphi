@@ -38,6 +38,8 @@ entities: {{ entities | yaml_list }}
 tags: {{ tags | yaml_list }}
 client_id: {{ client_id | yaml_scalar }}
 truncated: {{ truncated | yaml_scalar }}
+has_media: {{ has_media | yaml_scalar }}
+attachment_kinds: {{ attachment_kinds | yaml_list }}
 ---
 
 ## User

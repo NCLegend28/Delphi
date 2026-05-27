@@ -16,9 +16,73 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from memory.record import ConversationRecord, Message, Timings, TokenCounts
+from memory.record import (
+    AudioPart,
+    ConversationRecord,
+    ImageUrlPart,
+    Message,
+    MessageContent,
+    TextPart,
+    Timings,
+    TokenCounts,
+)
 from routing.classifier import ClassifyResult
 from routing.resolver import ResolvedModel
+
+
+def _content_to_payload(content: MessageContent) -> str | list[dict[str, Any]]:
+    if isinstance(content, str):
+        return content
+
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if isinstance(part, TextPart):
+            parts.append({"type": part.type, "text": part.text})
+        elif isinstance(part, ImageUrlPart):
+            parts.append({"type": part.type, "url": part.url})
+        elif isinstance(part, AudioPart):
+            parts.append(
+                {
+                    "type": part.type,
+                    "transcript": part.transcript,
+                    "mime_type": part.mime_type,
+                }
+            )
+        else:
+            raise TypeError(f"unsupported content part: {type(part)!r}")
+    return parts
+
+
+def _content_from_payload(data: Any) -> MessageContent:
+    if isinstance(data, str):
+        return data
+    if not isinstance(data, list):
+        raise TypeError(f"unsupported message content payload: {type(data)!r}")
+
+    parts = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise TypeError(f"unsupported content item payload: {type(item)!r}")
+        part_type = item.get("type")
+        if part_type == "text":
+            parts.append(TextPart(text=str(item.get("text", ""))))
+        elif part_type == "image_url":
+            url = item.get("url")
+            if url is None:
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict):
+                    url = image_url.get("url")
+            parts.append(ImageUrlPart(url=str(url or "")))
+        elif part_type == "input_audio":
+            parts.append(
+                AudioPart(
+                    transcript=item.get("transcript"),
+                    mime_type=item.get("mime_type"),
+                )
+            )
+        else:
+            raise ValueError(f"unknown content part type: {part_type!r}")
+    return tuple(parts)
 
 
 def to_payload(record: ConversationRecord) -> dict[str, Any]:
@@ -60,7 +124,9 @@ def to_payload(record: ConversationRecord) -> dict[str, Any]:
         "request_id": record.request_id,
         "schema_version": record.schema_version,
         "timestamp": record.timestamp.isoformat(),
-        "messages": [{"role": m.role, "content": m.content} for m in record.messages],
+        "messages": [
+            {"role": m.role, "content": _content_to_payload(m.content)} for m in record.messages
+        ],
         "soul_injected": record.soul_injected,
         "client_id": record.client_id,
         "stream_requested": record.stream_requested,
@@ -120,7 +186,8 @@ def from_payload(data: dict[str, Any]) -> ConversationRecord:
         schema_version=data.get("schema_version", 1),
         timestamp=datetime.fromisoformat(data["timestamp"]),
         messages=tuple(
-            Message(role=m["role"], content=m["content"]) for m in data.get("messages", [])
+            Message(role=m["role"], content=_content_from_payload(m["content"]))
+            for m in data.get("messages", [])
         ),
         soul_injected=data.get("soul_injected", False),
         client_id=data.get("client_id"),

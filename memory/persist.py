@@ -25,7 +25,13 @@ from __future__ import annotations
 from typing import Any
 
 from memory.entities import EntityIndex, ProcessedExchange
-from memory.record import ConversationRecord, Message
+from memory.record import (
+    AudioPart,
+    ConversationRecord,
+    ImageUrlPart,
+    Message,
+    content_text,
+)
 from memory.vault import ConversationNote, VaultWriter, WriteResult
 from telemetry.logger import RequestLogger, make_record
 from telemetry.metrics import Metrics, RequestStatus
@@ -34,8 +40,29 @@ from telemetry.metrics import Metrics, RequestStatus
 def _last_user_content(messages: tuple[Message, ...]) -> str:
     for message in reversed(messages):
         if message.role == "user":
-            return message.content
+            return content_text(message.content)
     return ""
+
+
+def _attachment_kinds(messages: tuple[Message, ...]) -> tuple[str, ...]:
+    """Distinct non-text part kinds across all messages, order-preserved.
+
+    Kept blob-free on purpose — only the *type* of attachment surfaces, never
+    the URL or audio bytes. Vault notes and JSONL logs stay grep-safe.
+    """
+    kinds: list[str] = []
+    for message in messages:
+        if isinstance(message.content, str):
+            continue
+        for part in message.content:
+            kind: str | None = None
+            if isinstance(part, ImageUrlPart):
+                kind = "image"
+            elif isinstance(part, AudioPart):
+                kind = "audio"
+            if kind and kind not in kinds:
+                kinds.append(kind)
+    return tuple(kinds)
 
 
 def _to_conversation_note(
@@ -44,6 +71,8 @@ def _to_conversation_note(
     classifier_confidence = None
     if record.resolved and record.resolved.classifier_result:
         classifier_confidence = record.resolved.classifier_result.confidence
+
+    kinds = _attachment_kinds(record.messages)
 
     return ConversationNote(
         timestamp=record.timestamp,
@@ -60,6 +89,8 @@ def _to_conversation_note(
         tags=[],
         client_id=record.client_id,
         truncated=record.truncated,
+        has_media=bool(kinds),
+        attachment_kinds=kinds,
     )
 
 
@@ -76,6 +107,8 @@ def _to_request_record(
     if record.timings and record.timings.ttft_ms is not None:
         ttft_ms = int(record.timings.ttft_ms)
     latency_ms = int(record.timings.completed_ms) if record.timings else 0
+
+    kinds = _attachment_kinds(record.messages)
 
     return make_record(
         request_id=record.request_id,
@@ -101,6 +134,8 @@ def _to_request_record(
         entities_referenced=processed.entities,
         entities_promoted=processed.promoted,
         project=processed.project,
+        has_media=bool(kinds),
+        attachment_kinds=list(kinds),
     )
 
 

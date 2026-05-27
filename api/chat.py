@@ -42,7 +42,16 @@ from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
 from memory.persist import run_persist
-from memory.record import ConversationRecord, Message, Timings, TokenCounts
+from memory.record import (
+    AudioPart,
+    ConversationRecord,
+    ImageUrlPart,
+    Message,
+    MessageContent,
+    TextPart,
+    Timings,
+    TokenCounts,
+)
 from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
@@ -78,6 +87,65 @@ def _fire(coro: Any) -> None:
 
 def _has_system_message(messages: list[dict[str, Any]]) -> bool:
     return any(isinstance(m, dict) and m.get("role") == "system" for m in messages)
+
+
+def _record_content_from_wire(content: Any) -> MessageContent:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        raise HTTPException(status_code=400, detail="message content must be a string or content-part list")
+    if not content:
+        raise HTTPException(status_code=400, detail="content array must not be empty")
+
+    parts = []
+    for item in content:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="content parts must be objects")
+
+        part_type = item.get("type")
+        if part_type == "text":
+            text = item.get("text")
+            if not isinstance(text, str):
+                raise HTTPException(status_code=400, detail="text parts must include string text")
+            parts.append(TextPart(text=text))
+            continue
+
+        if part_type == "image_url":
+            image_url = item.get("image_url")
+            if isinstance(image_url, dict):
+                url = image_url.get("url")
+            else:
+                url = item.get("url")
+            if not isinstance(url, str) or not url:
+                raise HTTPException(status_code=400, detail="image_url parts must include a url")
+            parts.append(ImageUrlPart(url=url))
+            continue
+
+        if part_type == "input_audio":
+            input_audio = item.get("input_audio")
+            transcript = item.get("transcript")
+            mime_type = item.get("mime_type")
+            if isinstance(input_audio, dict):
+                transcript = input_audio.get("transcript", transcript)
+                mime_type = input_audio.get("mime_type", input_audio.get("format", mime_type))
+            parts.append(
+                AudioPart(
+                    transcript=transcript if isinstance(transcript, str) else None,
+                    mime_type=mime_type if isinstance(mime_type, str) else None,
+                )
+            )
+            continue
+
+        raise HTTPException(status_code=400, detail=f"unsupported content part type: {part_type!r}")
+
+    return tuple(parts)
+
+
+def _record_message_from_wire(message: dict[str, Any]) -> Message:
+    return Message(
+        role=message.get("role", "user"),
+        content=_record_content_from_wire(message.get("content", "")),
+    )
 
 
 def _parse_sse_buffer(buffer: list[bytes]) -> tuple[str, str | None, TokenCounts | None]:
@@ -360,7 +428,7 @@ async def chat_completions(
     options: dict[str, Any] = dict(entry.options) if entry else {}
 
     record_messages = tuple(
-        Message(role=m.get("role", "user"), content=m.get("content", ""))
+        _record_message_from_wire(m)
         for m in full_messages
         if isinstance(m, dict)
     )

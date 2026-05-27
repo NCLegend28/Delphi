@@ -18,11 +18,63 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from routing.resolver import ResolvedModel
 
 Role = Literal["system", "user", "assistant", "tool"]
+
+
+@dataclass(frozen=True, slots=True)
+class TextPart:
+    """Structured text content from a multimodal message."""
+
+    text: str
+    type: Literal["text"] = "text"
+
+
+@dataclass(frozen=True, slots=True)
+class ImageUrlPart:
+    """Image attachment represented by a URL or data URL."""
+
+    url: str
+    type: Literal["image_url"] = "image_url"
+
+
+@dataclass(frozen=True, slots=True)
+class AudioPart:
+    """Audio attachment with optional transcript and mime type metadata."""
+
+    transcript: str | None = None
+    mime_type: str | None = None
+    type: Literal["input_audio"] = "input_audio"
+
+
+MessagePart: TypeAlias = TextPart | ImageUrlPart | AudioPart
+MessageContent: TypeAlias = str | tuple[MessagePart, ...]
+
+
+def _part_text(part: MessagePart) -> str:
+    if isinstance(part, TextPart):
+        return part.text
+    if isinstance(part, ImageUrlPart):
+        return "[image attachment]"
+    if isinstance(part, AudioPart):
+        return part.transcript or "[audio attachment]"
+    raise TypeError(f"unsupported content part: {type(part)!r}")
+
+
+def content_text(content: MessageContent) -> str:
+    """Flatten structured content into durable, human-readable text.
+
+    Durable memory should stay searchable and compact. Structured media
+    attachments therefore collapse to short markers instead of carrying raw
+    URLs or base64 payloads into the vault/log pipeline.
+    """
+
+    if isinstance(content, str):
+        return content
+    return "\n".join(_part_text(part) for part in content)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +87,7 @@ class Message:
     """
 
     role: Role
-    content: str
+    content: MessageContent
 
 
 @dataclass(frozen=True, slots=True)

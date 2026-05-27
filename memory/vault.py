@@ -59,6 +59,8 @@ class ConversationNote:
     tags: list[str] = field(default_factory=list)
     client_id: str | None = None
     truncated: bool = False
+    has_media: bool = False
+    attachment_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,8 @@ class VaultWriter:
             tags=note.tags,
             client_id=note.client_id,
             truncated=note.truncated,
+            has_media=note.has_media,
+            attachment_kinds=list(note.attachment_kinds),
             user_message=note.user_message.rstrip(),
             assistant_message=note.assistant_message.rstrip(),
         )

@@ -9,9 +9,20 @@ from datetime import datetime, timezone
 
 import pytest
 
-from memory.record import ConversationRecord, Message, Timings, TokenCounts
+from memory.record import (
+    AudioPart,
+    ConversationRecord,
+    ImageUrlPart,
+    Message,
+    TextPart,
+    Timings,
+    TokenCounts,
+    content_text,
+)
+from memory.persist import _last_user_content
 from routing.classifier import ClassifyResult
 from routing.resolver import ResolvedModel
+from worker.serde import from_payload, to_payload
 
 
 def test_minimal_construction() -> None:
@@ -101,3 +112,55 @@ def test_record_immutability() -> None:
     msg = Message(role="user", content="hi")
     with pytest.raises((AttributeError, Exception)):
         msg.content = "different"  # type: ignore[misc]
+
+
+def test_content_text_flattens_structured_multimodal_content() -> None:
+    content = (
+        TextPart(text="describe this"),
+        ImageUrlPart(url="data:image/png;base64,AAAA"),
+        AudioPart(transcript="spoken follow-up", mime_type="audio/webm"),
+    )
+
+    assert content_text(content) == "describe this\n[image attachment]\nspoken follow-up"
+
+
+def test_structured_message_content_round_trips_through_queue_payload() -> None:
+    record = ConversationRecord(
+        request_id="req_mm",
+        messages=(
+            Message(
+                role="user",
+                content=(
+                    TextPart(text="What is in this image?"),
+                    ImageUrlPart(url="data:image/png;base64,AAAA"),
+                    AudioPart(transcript="I also said this aloud", mime_type="audio/webm"),
+                ),
+            ),
+        ),
+    )
+
+    payload = to_payload(record)
+    restored = from_payload(payload)
+
+    assert restored == record
+    assert isinstance(restored.messages[0].content, tuple)
+    assert restored.messages[0].content[0] == TextPart(text="What is in this image?")
+    assert restored.messages[0].content[1] == ImageUrlPart(url="data:image/png;base64,AAAA")
+    assert restored.messages[0].content[2] == AudioPart(
+        transcript="I also said this aloud", mime_type="audio/webm"
+    )
+
+
+def test_last_user_content_derives_text_from_structured_message_content() -> None:
+    messages = (
+        Message(role="assistant", content="earlier reply"),
+        Message(
+            role="user",
+            content=(
+                TextPart(text="Read this chart"),
+                ImageUrlPart(url="data:image/png;base64,BBBB"),
+            ),
+        ),
+    )
+
+    assert _last_user_content(messages) == "Read this chart\n[image attachment]"

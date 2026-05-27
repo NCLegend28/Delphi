@@ -144,6 +144,7 @@ def install_ollama_dispatcher(
     classifier_task: str = "code",
     chat_response: httpx.Response | None = None,
     counters: dict[str, int] | None = None,
+    seen_chat_payloads: list[dict[str, Any]] | None = None,
 ) -> respx.Route:
     """Route the shared ``/v1/chat/completions`` mock by the request's ``model``."""
     counters = counters if counters is not None else {}
@@ -158,6 +159,8 @@ def install_ollama_dispatcher(
             counters["classifier"] += 1
             return _classifier_reply(classifier_task)
         counters["chat"] += 1
+        if seen_chat_payloads is not None:
+            seen_chat_payloads.append(payload)
         return chat_response
 
     return respx.post(f"{OLLAMA_BASE}/v1/chat/completions").mock(side_effect=handle)
@@ -306,6 +309,89 @@ async def test_client_system_message_disables_soul_injection(
     await _wait_for_vault_write(vault_path)
     log_line = await _wait_for_log_line(request_logger.path)
     assert log_line["soul_injected"] is False
+
+
+@respx.mock
+async def test_structured_user_content_is_forwarded_upstream_and_persisted_safely(
+    app: FastAPI, vault_path: Path
+) -> None:
+    seen_chat_payloads: list[dict[str, Any]] = []
+    install_ollama_dispatcher(seen_chat_payloads=seen_chat_payloads)
+
+    user_content = [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]
+
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "task_type": "chat",
+                "stream": False,
+                "messages": [{"role": "user", "content": user_content}],
+            },
+            headers=AUTH,
+        )
+
+    assert response.status_code == 200
+    assert len(seen_chat_payloads) == 1
+    assert seen_chat_payloads[0]["messages"][-1]["content"] == user_content
+
+    note = await _wait_for_vault_write(vault_path)
+    body = note.read_text()
+    assert "What is in this image?" in body
+    assert "[image attachment]" in body
+    assert "data:image/png;base64,AAAA" not in body
+
+
+@respx.mock
+async def test_empty_content_array_returns_400(app: FastAPI) -> None:
+    """An empty content list is malformed — surface a clear 400, not a crash."""
+    install_ollama_dispatcher()
+    async with _client(app) as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "task_type": "chat",
+                "stream": False,
+                "messages": [{"role": "user", "content": []}],
+            },
+            headers=AUTH,
+        )
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+@respx.mock
+async def test_media_metadata_surfaces_in_vault_and_log_without_blobs(
+    app: FastAPI, vault_path: Path, request_logger: RequestLogger
+) -> None:
+    install_ollama_dispatcher()
+    user_content = [
+        {"type": "text", "text": "what is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,ZZZZ"}},
+    ]
+    async with _client(app) as client:
+        await client.post(
+            "/v1/chat/completions",
+            json={
+                "task_type": "chat",
+                "stream": False,
+                "messages": [{"role": "user", "content": user_content}],
+            },
+            headers=AUTH,
+        )
+
+    note = await _wait_for_vault_write(vault_path)
+    fm = _split_frontmatter(note.read_text())
+    assert fm["has_media"] is True
+    assert "image" in fm["attachment_kinds"]
+
+    log_line = await _wait_for_log_line(request_logger.path)
+    assert log_line["has_media"] is True
+    assert "image" in log_line["attachment_kinds"]
+    assert "data:image/png;base64,ZZZZ" not in json.dumps(log_line)
 
 
 @respx.mock

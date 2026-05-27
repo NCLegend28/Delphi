@@ -151,3 +151,37 @@ async def test_null_project_renders_as_yaml_null(tmp_path: Path, project_value: 
         assert fm["project"] is None
     else:
         assert fm["project"] == project_value
+
+
+async def test_media_attachments_surface_in_frontmatter_and_body_without_blobs(
+    tmp_path: Path,
+) -> None:
+    """has_media + attachment_kinds in frontmatter, marker in body, no URLs/base64."""
+    writer = VaultWriter(tmp_path, timezone="America/Chicago")
+    await writer.write(
+        _note(
+            user_message="what is in this image?\n[image attachment]",
+            has_media=True,
+            attachment_kinds=("image",),
+        )
+    )
+    conv_file = next((tmp_path / "conversations" / "2026-05-10").iterdir())
+    text = conv_file.read_text()
+    fm, body = _split_frontmatter(text)
+
+    assert fm["has_media"] is True
+    assert fm["attachment_kinds"] == ["image"]
+    assert "[image attachment]" in body
+    assert "data:image/" not in text
+    assert "base64" not in text
+    assert "http://" not in text
+    assert "https://" not in text
+
+
+async def test_no_media_defaults_render_empty_and_false(tmp_path: Path) -> None:
+    writer = VaultWriter(tmp_path, timezone="America/Chicago")
+    await writer.write(_note())
+    conv_file = next((tmp_path / "conversations" / "2026-05-10").iterdir())
+    fm, _ = _split_frontmatter(conv_file.read_text())
+    assert fm["has_media"] is False
+    assert fm["attachment_kinds"] == []

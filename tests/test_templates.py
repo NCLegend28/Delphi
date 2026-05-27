@@ -66,6 +66,8 @@ def _conv_context(**overrides: object) -> dict[str, object]:
         "tags": ["routing"],
         "client_id": "agentrig-m4",
         "truncated": False,
+        "has_media": False,
+        "attachment_kinds": [],
         "user_message": "refactor this",
         "assistant_message": "here you go",
     }
