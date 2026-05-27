@@ -396,7 +396,14 @@ export function createTokenParser(onFirstChatChunk) {
       const body = previewBuf.replace(/^\n+|\n+$/g, "");
       if (previewMeta.kind === "media") {
         const media = parseMediaBody(body);
-        if (media.url) delphi.setPreview({ kind: "media", ...media });
+        if (media.url) {
+          delphi.setPreview({ kind: "media", ...media });
+        } else if (body) {
+          // Model opened [PREVIEW:media] with no usable URL (common with small
+          // models that hallucinate the directive). Don't swallow the text —
+          // emit it as plain chat so the operator sees what was said.
+          emitChat(body);
+        }
       } else {
         delphi.setPreview({
           kind: previewMeta.kind,

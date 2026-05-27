@@ -64,7 +64,7 @@ export function ChatRail() {
         ))}
       </div>
 
-      <InputBar onSubmit={send} onTranscribe={transcribe} />
+      <InputBar onSubmit={(text, draft) => send(draft ?? text)} onTranscribe={transcribe} />
     </div>
   );
 }
