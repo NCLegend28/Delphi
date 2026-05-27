@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { uid } from "../lib/uid";
 
 /**
  * delphiStore — Delphi's "ambient state" parsed out of the response stream
@@ -11,7 +12,14 @@ import { create } from "zustand";
  *
  *   mode          current emission phase — IDLE / THINKING / BUILDING / SEARCHING
  *   activeTask    short label shown in HUD ("Refactoring soul.py")
- *   preview       { kind: 'code'|'document', language?: string, content: string }
+ *   preview       One of the three shapes the OutputCanvas knows how to render:
+ *                   { kind: 'code',     language?: string, content: string }
+ *                   { kind: 'document',                    content: string }
+ *                   { kind: 'media',    url: string, alt?: string, mimeType?: string }
+ *                 The 'media' shape is set either by a `[PREVIEW:media]` stream
+ *                 directive or, at send-time, by the UI surfacing the user's
+ *                 own attached image so the operator can verify what Delphi
+ *                 saw. The directive (if any) naturally overrides it.
  *   model         which model served the last response
  *   error         last stream-level error, surfaced in the chat rail
  *   events        rolling task-log feed — { id, ts, text } (newest last)
@@ -46,7 +54,7 @@ export const useDelphiStore = create((set) => ({
   /** Append a line to the task-log feed. Caps to the most recent MAX_EVENTS. */
   pushEvent: (text) =>
     set((s) => {
-      const event = { id: crypto.randomUUID(), ts: Date.now(), text };
+      const event = { id: uid(), ts: Date.now(), text };
       const events = [...s.events, event];
       return { events: events.slice(-MAX_EVENTS) };
     }),

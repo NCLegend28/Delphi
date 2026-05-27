@@ -60,6 +60,12 @@ Directives (each on its own line, exact bracket syntax):
   (e.g. ``python``, ``javascript``, ``json``, ``markdown``).
 - ``[PREVIEW:document]`` … markdown body … ``[/PREVIEW]`` — push prose,
   notes, or a plan into the preview box.
+- ``[PREVIEW:media]`` … body … ``[/PREVIEW]`` — push an image (or other
+  media reference) into the preview box. The body is either a JSON object
+  (``{"url": "...", "alt": "...", "mimeType": "image/png"}``) or, when
+  only a URL is available, the raw URL on its own line. Use this to echo
+  the user's attached image back, or to reference an image stored in the
+  vault — never invent URLs.
 
 Rules:
 - Directives are out-of-band. Do not narrate them ("now setting mode to

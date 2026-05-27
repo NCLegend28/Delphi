@@ -51,6 +51,12 @@ export function cancelDelphiStream() {
  *   [TASK: short label]
  *   [PREVIEW:code:<lang>] ... body ... [/PREVIEW]
  *   [PREVIEW:document]    ... body ... [/PREVIEW]
+ *   [PREVIEW:media]       <json or plain url> [/PREVIEW]
+ *
+ * For [PREVIEW:media], the body is either a JSON object
+ * ({"url": "...", "alt": "...", "mimeType": "image/png"}) or, when the model
+ * just emits a URL, the raw URL string. Either way it becomes a preview of
+ * shape { kind: 'media', url, alt?, mimeType? }.
  */
 export function useDelphiStream() {
   const send = useCallback(async (input) => {
@@ -70,6 +76,18 @@ export function useDelphiStream() {
       images.length > 0 ? { attachments: images } : undefined,
     );
     delphi.clearPreview();
+    // Mirror the user's first attached image in the OutputCanvas so the
+    // operator can verify what Delphi will actually see. Any subsequent
+    // [PREVIEW:...] directive from the model naturally overrides this.
+    const firstImage = images.find((img) => img?.dataUrl);
+    if (firstImage) {
+      delphi.setPreview({
+        kind: "media",
+        url: firstImage.dataUrl,
+        alt: firstImage.alt || "user attachment",
+        mimeType: firstImage.mimeType || null,
+      });
+    }
     delphi.setActiveTask(null);
     delphi.setError(null);
     delphi.setMode("THINKING");
@@ -238,6 +256,30 @@ function buildContent(msg) {
   return parts;
 }
 
+/**
+ * Parse a `[PREVIEW:media]` body. Two accepted forms:
+ *   - JSON object: {"url": "...", "alt": "...", "mimeType": "image/png"}
+ *   - Raw URL (anything that isn't valid JSON is treated as a URL).
+ * Returns { url, alt?, mimeType? }. `url` may be empty if the body is junk.
+ */
+function parseMediaBody(body) {
+  const trimmed = (body ?? "").trim();
+  if (!trimmed) return { url: "" };
+  if (trimmed.startsWith("{")) {
+    try {
+      const obj = JSON.parse(trimmed);
+      const url = typeof obj?.url === "string" ? obj.url.trim() : "";
+      const out = { url };
+      if (typeof obj?.alt === "string") out.alt = obj.alt;
+      if (typeof obj?.mimeType === "string") out.mimeType = obj.mimeType;
+      return out;
+    } catch {
+      /* fall through to raw-url handling */
+    }
+  }
+  return { url: trimmed };
+}
+
 /** Pick a sensible filename for the multipart upload from the mime type. */
 function filenameFor(mime) {
   if (!mime) return "audio.webm";
@@ -339,11 +381,17 @@ export function createTokenParser(onFirstChatChunk) {
 
   function commitPreview() {
     if (previewMeta) {
-      delphi.setPreview({
-        kind: previewMeta.kind,
-        language: previewMeta.language ?? null,
-        content: previewBuf.replace(/^\n+|\n+$/g, ""),
-      });
+      const body = previewBuf.replace(/^\n+|\n+$/g, "");
+      if (previewMeta.kind === "media") {
+        const media = parseMediaBody(body);
+        if (media.url) delphi.setPreview({ kind: "media", ...media });
+      } else {
+        delphi.setPreview({
+          kind: previewMeta.kind,
+          language: previewMeta.language ?? null,
+          content: body,
+        });
+      }
     }
     previewMeta = null;
     previewBuf = "";
@@ -373,12 +421,18 @@ export function createTokenParser(onFirstChatChunk) {
       return;
     }
     if (raw.startsWith("[PREVIEW:")) {
-      // Forms: "[PREVIEW:code:python]" or "[PREVIEW:document]"
-      const parts = inner.slice(8).trim().split(":");
+      // Forms: "[PREVIEW:code:python]" | "[PREVIEW:document]" | "[PREVIEW:media]"
+      // Strip "[PREVIEW:" and the trailing "]" to get the colon-separated tail.
+      const tail = raw.slice("[PREVIEW:".length, -1).trim();
+      const parts = tail.split(":");
       const kind = (parts[0] || "document").toLowerCase();
       const language = parts[1]?.trim() || null;
+      let normalizedKind;
+      if (kind === "code") normalizedKind = "code";
+      else if (kind === "media") normalizedKind = "media";
+      else normalizedKind = "document";
       previewMeta = {
-        kind: kind === "code" ? "code" : "document",
+        kind: normalizedKind,
         language,
       };
       previewBuf = "";

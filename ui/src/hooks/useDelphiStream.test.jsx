@@ -171,3 +171,80 @@ describe("useDelphiStream.transcribe", () => {
     ).rejects.toThrow(/413/);
   });
 });
+
+describe("useDelphiStream directive parsing", () => {
+  it("parses [PREVIEW:media] with a JSON body into delphiStore", async () => {
+    const body = JSON.stringify({
+      url: "https://example.com/x.png",
+      alt: "snapshot",
+      mimeType: "image/png",
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockChatResponse([
+        "hi ",
+        `[PREVIEW:media]\n${body}\n[/PREVIEW]`,
+        " done",
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send("show me");
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toEqual({
+      kind: "media",
+      url: "https://example.com/x.png",
+      alt: "snapshot",
+      mimeType: "image/png",
+    });
+  });
+
+  it("parses [PREVIEW:media] with a raw URL body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockChatResponse(["[PREVIEW:media]https://example.com/y.jpg[/PREVIEW]"]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send("look");
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toMatchObject({
+      kind: "media",
+      url: "https://example.com/y.jpg",
+    });
+    expect(preview.alt).toBeUndefined();
+  });
+
+  it("auto-sets a media preview from the user's first attached image at send time", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockChatResponse(["ack"]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send({
+        text: "what is this?",
+        images: [
+          {
+            mimeType: "image/png",
+            dataUrl: "data:image/png;base64,ZZZ",
+            width: 10,
+            height: 10,
+          },
+        ],
+      });
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toMatchObject({
+      kind: "media",
+      url: "data:image/png;base64,ZZZ",
+      mimeType: "image/png",
+    });
+  });
+});

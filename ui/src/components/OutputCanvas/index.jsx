@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Prism from "prismjs";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-json";
@@ -128,7 +128,11 @@ function Awaiting() {
 
 function PreviewBlock({ preview }) {
   const label =
-    preview.kind === "code" ? `CODE · ${preview.language ?? "PLAIN"}`.toUpperCase() : "DOCUMENT";
+    preview.kind === "code"
+      ? `CODE · ${preview.language ?? "PLAIN"}`.toUpperCase()
+      : preview.kind === "media"
+        ? "MEDIA"
+        : "DOCUMENT";
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
@@ -138,6 +142,8 @@ function PreviewBlock({ preview }) {
       <div className="overflow-auto rounded-sm border border-[var(--color-border-dim)] border-l-2 border-l-[var(--color-accent-amber)] bg-[var(--color-bg-surface)]/80">
         {preview.kind === "code" ? (
           <CodeBlock language={preview.language} content={preview.content} />
+        ) : preview.kind === "media" ? (
+          <MediaBlock url={preview.url} alt={preview.alt} mimeType={preview.mimeType} />
         ) : (
           <div className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-[var(--color-text-primary)]">
             {preview.content}
@@ -145,6 +151,43 @@ function PreviewBlock({ preview }) {
         )}
       </div>
     </div>
+  );
+}
+
+function MediaBlock({ url, alt, mimeType }) {
+  const [failed, setFailed] = useState(false);
+  const isImage = typeof mimeType === "string" && mimeType.startsWith("image/");
+  // When mimeType is unknown, optimistically attempt image render; an onError
+  // fallback handles unsupported / broken sources.
+  const supported = isImage || !mimeType;
+  const caption = alt || "media";
+
+  if (!url || failed || !supported) {
+    return (
+      <div className="bg-grid flex items-center justify-center p-6">
+        <span
+          role="status"
+          aria-label="media unavailable"
+          className="rounded-full border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)]/90 px-3 py-1 font-mono text-[10px] tracking-[0.2em] text-[var(--color-text-faint)]"
+        >
+          MEDIA UNAVAILABLE · {caption}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <figure className="bg-grid flex flex-col items-center gap-2 p-3">
+      <img
+        src={url}
+        alt={caption}
+        onError={() => setFailed(true)}
+        className="block max-h-[60vh] max-w-full"
+        style={{ objectFit: "contain" }}
+      />
+      <figcaption className="font-mono text-[10px] tracking-[0.15em] text-[var(--color-text-faint)]">
+        {caption}
+      </figcaption>
+    </figure>
   );
 }
 

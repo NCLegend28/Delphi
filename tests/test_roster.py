@@ -124,6 +124,14 @@ def test_ui_protocol_appendix_is_nonempty() -> None:
     assert UI_PROTOCOL_APPENDIX.strip()
 
 
+def test_ui_protocol_appendix_documents_media_preview_directive() -> None:
+    """The media preview directive must be advertised so the model emits it."""
+    assert "[PREVIEW:media]" in UI_PROTOCOL_APPENDIX
+    # And it must flow through to the rendered prompt:
+    out = soul_for("chat", client_id="delphi-ui")
+    assert "[PREVIEW:media]" in out
+
+
 def test_ui_client_ids_includes_delphi_ui() -> None:
     assert "delphi-ui" in UI_CLIENT_IDS
 
