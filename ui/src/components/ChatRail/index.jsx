@@ -56,6 +56,9 @@ export function ChatRail() {
             key={m.id}
             role={m.role}
             content={m.content}
+            attachments={m.attachments}
+            transcript={m.transcript}
+            audioUrl={m.audioUrl}
             streaming={m.id === streamingId}
           />
         ))}

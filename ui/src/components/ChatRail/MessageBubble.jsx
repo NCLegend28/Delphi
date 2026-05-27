@@ -3,9 +3,26 @@
  *
  * `user` bubbles are right-aligned with a cyan-tinted border; `delphi` bubbles
  * are left-aligned on a raised surface and animate a caret while streaming.
+ *
+ * User bubbles may carry optional `attachments` (image thumbnails) and a
+ * `transcript`/`audioUrl` pair for audio-origin messages. Assistant bubbles
+ * stay text-only for now.
  */
-export function MessageBubble({ role, content, streaming }) {
+export function MessageBubble({
+  role,
+  content,
+  streaming,
+  attachments,
+  transcript,
+  audioUrl,
+}) {
   const isUser = role === "user";
+  const images = isUser && Array.isArray(attachments)
+    ? attachments.filter((a) => a?.kind === "image" && a.dataUrl)
+    : [];
+  const hasAudio = isUser && (transcript != null || audioUrl);
+  const displayText = content || (transcript ?? "");
+
   return (
     <div className={`flex gap-2 animate-fade-up ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && <Tag>DELPHI</Tag>}
@@ -17,7 +34,30 @@ export function MessageBubble({ role, content, streaming }) {
             : "rounded-[0_4px_4px_4px] border border-[var(--color-border-dim)] bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]",
         ].join(" ")}
       >
-        <span className="whitespace-pre-wrap">{content}</span>
+        {images.length > 0 && (
+          <div
+            data-testid="bubble-thumbs"
+            className="mb-1.5 flex flex-wrap gap-1.5"
+          >
+            {images.map((img) => (
+              <img
+                key={img.id}
+                src={img.dataUrl}
+                alt={img.alt ?? "attachment"}
+                className="h-16 w-16 rounded-[2px] border border-[var(--color-border-dim)] object-cover"
+              />
+            ))}
+          </div>
+        )}
+        {hasAudio && (
+          <div className="mb-1 flex items-center gap-1 text-[8px] tracking-[0.18em] text-[var(--color-accent-cyan)]">
+            <span aria-hidden="true">🎙</span>
+            <span>TRANSCRIPT</span>
+          </div>
+        )}
+        {(displayText || streaming) && (
+          <span className="whitespace-pre-wrap">{displayText}</span>
+        )}
         {streaming && <Caret />}
       </div>
       {isUser && <Tag>YOU</Tag>}

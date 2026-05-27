@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { uid } from "../lib/uid";
 
 /**
  * chatStore — conversation history and streaming state.
@@ -8,7 +9,18 @@ import { create } from "zustand";
  * across reloads in Phase 2. (Persistence is a Phase 6 concern.)
  *
  * Shape of a message:
- *   { id: string, role: 'user' | 'assistant', content: string, ts: number }
+ *   {
+ *     id: string,
+ *     role: 'user' | 'assistant',
+ *     content: string,
+ *     ts: number,
+ *     // optional multimodal extras (Task 5):
+ *     attachments?: Array<{ id, kind: 'image', mimeType, dataUrl, width, height }>,
+ *     transcript?: string | null,    // audio-origin user messages
+ *     audioUrl?: string | null,      // blob URL for local playback
+ *   }
+ *
+ * Existing text-only messages stay valid — the extras default to undefined.
  */
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -16,14 +28,32 @@ export const useChatStore = create((set, get) => ({
   streamingId: null,
   error: null,
 
-  /** Append a user message. Returns the new message object. */
-  addUserMessage: (content) => {
+  /**
+   * Append a user message.
+   *
+   * Backward-compatible signature: a bare string still works. Pass an opts
+   * object to attach images/audio metadata to the bubble.
+   *
+   *   addUserMessage("hi")
+   *   addUserMessage("what's this?", { attachments: [...] })
+   *   addUserMessage("", { transcript: "hello", audioUrl, attachments: [] })
+   *
+   * @param {string} content
+   * @param {{ attachments?: Array, transcript?: string|null, audioUrl?: string|null }} [opts]
+   */
+  addUserMessage: (content, opts = {}) => {
+    const { attachments, transcript, audioUrl } = opts ?? {};
     const msg = {
-      id: crypto.randomUUID(),
+      id: uid(),
       role: "user",
-      content,
+      content: content ?? "",
       ts: Date.now(),
     };
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      msg.attachments = attachments;
+    }
+    if (transcript != null) msg.transcript = transcript;
+    if (audioUrl != null) msg.audioUrl = audioUrl;
     set((s) => ({ messages: [...s.messages, msg], error: null }));
     return msg;
   },
@@ -37,7 +67,7 @@ export const useChatStore = create((set, get) => ({
 
   /** Begin a streaming assistant response. Creates an empty bubble. */
   startAssistantMessage: () => {
-    const id = crypto.randomUUID();
+    const id = uid();
     const msg = { id, role: "assistant", content: "", ts: Date.now() };
     set((s) => ({
       messages: [...s.messages, msg],
