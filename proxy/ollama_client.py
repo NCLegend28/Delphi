@@ -103,7 +103,7 @@ class OllamaClient:
         self,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         options: dict[str, Any] | None = None,
     ) -> AsyncIterator[bytes]:
         """Yield raw SSE byte chunks from Ollama's streaming endpoint.

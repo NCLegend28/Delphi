@@ -103,3 +103,38 @@ async def test_external_client_not_closed() -> None:
         pass
     assert not external.is_closed
     await external.aclose()
+
+
+@respx.mock
+async def test_stream_chat_forwards_structured_multimodal_content(
+    client: OllamaClient,
+) -> None:
+    """The proxy must pass list-of-parts content through verbatim — no flattening."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            content=b"data: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    respx.post(f"{BASE}/v1/chat/completions").mock(side_effect=handler)
+
+    user_content = [
+        {"type": "text", "text": "what is this?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]
+    async for _ in client.stream_chat(
+        model="phi4:14b",
+        messages=[{"role": "user", "content": user_content}],
+    ):
+        pass
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["messages"][-1]["content"] == user_content
+    await client.aclose()

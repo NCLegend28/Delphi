@@ -53,6 +53,18 @@ def _last_user_message(messages: list[dict[str, Any]] | None) -> str:
             content = message.get("content")
             if isinstance(content, str):
                 return content
+            if isinstance(content, list):
+                # Multimodal: flatten only text parts; classifier routes on
+                # words, not pixels or audio bytes.
+                texts: list[str] = []
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") == "text":
+                        text = part.get("text")
+                        if isinstance(text, str):
+                            texts.append(text)
+                return "\n".join(texts)
     return ""
 
 

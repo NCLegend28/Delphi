@@ -157,3 +157,21 @@ async def test_resolved_model_is_immutable() -> None:
     resolved = await resolve_model({"model": "phi4:14b"}, clf, _roster())
     with pytest.raises((AttributeError, Exception)):
         resolved.model = "other"  # type: ignore[misc]
+
+
+async def test_multimodal_user_content_flattens_text_only_for_classifier() -> None:
+    """Image / audio parts are ignored; text parts joined with newlines."""
+    clf = _classifier(task_type="chat", confidence=0.5)
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                {"type": "text", "text": "in detail"},
+                {"type": "input_audio", "input_audio": {"transcript": "ignore me"}},
+            ],
+        }
+    ]
+    await resolve_model({"messages": messages}, clf, _roster())
+    assert clf.calls == ["describe this\nin detail"]
