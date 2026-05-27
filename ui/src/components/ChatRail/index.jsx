@@ -16,7 +16,7 @@ export function ChatRail() {
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamingId = useChatStore((s) => s.streamingId);
   const error = useChatStore((s) => s.error);
-  const { send } = useDelphiStream();
+  const { send, transcribe } = useDelphiStream();
 
   const scrollerRef = useRef(null);
   useEffect(() => {
@@ -64,7 +64,7 @@ export function ChatRail() {
         ))}
       </div>
 
-      <InputBar onSubmit={send} />
+      <InputBar onSubmit={send} onTranscribe={transcribe} />
     </div>
   );
 }

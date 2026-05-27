@@ -18,13 +18,22 @@ import { uid } from "../../lib/uid";
  *
  * Listens for the window `delphi:focus-input` event (dispatched by the ⌘K
  * shortcut in App) so the operator can jump to the prompt from anywhere.
+ *
+ * Speech-to-text (Task 6): when the recorder stops and yields a blob, we
+ * fire `transcribe(blob, mime)` from useDelphiStream automatically and drop
+ * the returned text into the textarea for the operator to edit. The audio
+ * draft is then cleared. If transcription fails the inline error is shown
+ * and the audio chip is kept so the operator can retry or discard.
  */
-export function InputBar({ onSubmit, recorderHook = useRecorder }) {
+export function InputBar({ onSubmit, onTranscribe, recorderHook = useRecorder }) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [attachError, setAttachError] = useState(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState(null);
   const taRef = useRef(null);
   const fileInputRef = useRef(null);
+  const transcribedBlobRef = useRef(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const recorder = recorderHook();
 
@@ -34,20 +43,51 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
     return () => window.removeEventListener("delphi:focus-input", focus);
   }, []);
 
-  const resetDraft = useCallback(() => {
-    setValue("");
-    setAttachments([]);
-    setAttachError(null);
-    if (recorder.status === "stopped" || recorder.status === "recording") {
-      recorder.cancel();
-    }
-  }, [recorder]);
+  // Auto-transcribe when a new recording lands. We dedupe by blob identity
+  // so re-renders don't refire on the same clip. Transcribe failures keep
+  // the audio chip so the user can retry by re-recording or just discard.
+  useEffect(() => {
+    if (!recorder.blob || !onTranscribe) return;
+    if (transcribedBlobRef.current === recorder.blob) return;
+    transcribedBlobRef.current = recorder.blob;
+
+    let cancelled = false;
+    setTranscribing(true);
+    setTranscribeError(null);
+    (async () => {
+      try {
+        const text = await onTranscribe(recorder.blob, recorder.mimeType);
+        if (cancelled) return;
+        const clean = (text ?? "").trim();
+        if (clean) {
+          setValue((prev) => {
+            const next = prev ? `${prev.replace(/\s+$/, "")} ${clean}` : clean;
+            queueMicrotask(() => autosize(taRef.current, next));
+            return next;
+          });
+        }
+        // Clear the audio chip — the textarea is now the source of truth.
+        recorder.cancel();
+        // Focus so the operator can edit before sending.
+        taRef.current?.focus();
+      } catch (err) {
+        if (cancelled) return;
+        setTranscribeError(err?.message ?? "transcription failed");
+      } finally {
+        if (!cancelled) setTranscribing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [recorder.blob, recorder.mimeType, onTranscribe, recorder]);
 
   const submit = () => {
     const text = value.trim();
     const hasAudio = Boolean(recorder.blob);
     if (!text && attachments.length === 0 && !hasAudio) return;
     if (isStreaming) return;
+    if (transcribing) return;
 
     const draft = {
       text,
@@ -74,6 +114,8 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
     setValue("");
     setAttachments([]);
     setAttachError(null);
+    setTranscribeError(null);
+    transcribedBlobRef.current = null;
     if (hasAudio) recorder.cancel();
   };
 
@@ -118,7 +160,10 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
       recorder.stop();
     } else if (recorder.status === "stopped") {
       recorder.cancel();
+      transcribedBlobRef.current = null;
+      setTranscribeError(null);
     } else {
+      setTranscribeError(null);
       recorder.start();
     }
   };
@@ -134,7 +179,11 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
         submit();
       }}
     >
-      {(attachments.length > 0 || recorder.blob || attachError) && (
+      {(attachments.length > 0 ||
+        recorder.blob ||
+        attachError ||
+        transcribing ||
+        transcribeError) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {attachments.map((a) => (
             <div
@@ -167,12 +216,32 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
               <button
                 type="button"
                 aria-label="discard recording"
-                onClick={() => recorder.cancel()}
+                onClick={() => {
+                  recorder.cancel();
+                  transcribedBlobRef.current = null;
+                  setTranscribeError(null);
+                }}
                 className="text-[var(--color-accent-red)] hover:opacity-80"
               >
                 ×
               </button>
             </div>
+          )}
+          {transcribing && (
+            <span
+              data-testid="transcribing"
+              className="text-[9px] tracking-[0.15em] text-[var(--color-accent-amber)] animate-pulse"
+            >
+              transcribing…
+            </span>
+          )}
+          {transcribeError && !transcribing && (
+            <span
+              data-testid="transcribe-error"
+              className="text-[9px] tracking-[0.1em] text-[var(--color-accent-red)]"
+            >
+              {transcribeError}
+            </span>
           )}
           {attachError && (
             <span className="text-[9px] tracking-[0.1em] text-[var(--color-accent-red)]">
@@ -226,7 +295,7 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
                 ? "discard recording"
                 : "record audio"
             }
-            disabled={isStreaming || recorder.status === "requesting"}
+            disabled={isStreaming || recorder.status === "requesting" || transcribing}
             onClick={onMicClick}
             data-testid="mic-button"
             className={[
@@ -244,7 +313,7 @@ export function InputBar({ onSubmit, recorderHook = useRecorder }) {
 
         <button
           type="submit"
-          disabled={isStreaming || !hasDraft}
+          disabled={isStreaming || !hasDraft || transcribing}
           className="shrink-0 border border-[var(--color-border-strong)] px-3 py-[5px] text-[9px] tracking-[0.2em] text-[var(--color-text-muted)] transition hover:border-[var(--color-accent-cyan)] hover:bg-[var(--color-accent-cyan)]/10 hover:text-[var(--color-accent-cyan)] hover:shadow-[var(--shadow-glow-cyan)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-[var(--color-border-strong)] disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-muted)] disabled:hover:shadow-none"
         >
           SEND

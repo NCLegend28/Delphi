@@ -18,50 +18,73 @@ export function cancelDelphiStream() {
 /**
  * useDelphiStream — the only path through which the UI talks to Delphi.
  *
- * Returns `{ send, cancel }`:
+ * Returns `{ send, cancel, transcribe }`:
  *
- *   send(text)   — POST text + full prior history to /v1/chat/completions,
- *                  parse the SSE response, route plain text into chatStore
- *                  and inline directives into delphiStore.
- *   cancel()     — abort the in-flight request.
+ *   send(input)        — POST text (+ images) and full prior history to
+ *                        /v1/chat/completions; parse SSE; route deltas into
+ *                        chatStore and inline directives into delphiStore.
+ *                        `input` is either a plain string (legacy) or a draft
+ *                        object: { text, images?: [{mimeType, dataUrl, ...}] }
+ *   cancel()           — abort the in-flight request.
+ *   transcribe(blob, mimeType) — POST multipart audio to
+ *                        /v1/audio/transcriptions, returns a Promise<string>
+ *                        of the transcript text. The caller is expected to
+ *                        route this text back into the input field so the
+ *                        operator can edit before sending.
  *
- * The protocol the model emits is documented in `routing/soul.py` under
- * `UI_PROTOCOL_APPENDIX`. The parser strips these tokens from the rendered
- * chat text:
+ * Multimodal wire format (Task 6): when images are present, the message's
+ * `content` field becomes an OpenAI-style content array of parts:
+ *
+ *   [
+ *     { type: "text",      text: "..." },
+ *     { type: "image_url", image_url: { url: "data:..." } },
+ *     ...
+ *   ]
+ *
+ * Text-only messages keep `content` as a plain string for back-compat with
+ * any tests / proxies that still expect that shape.
+ *
+ * The directive protocol the model emits is documented in `routing/soul.py`
+ * under `UI_PROTOCOL_APPENDIX`. The parser strips these tokens from chat:
  *
  *   [MODE:THINKING|BUILDING|SEARCHING|IDLE]
  *   [TASK: short label]
  *   [PREVIEW:code:<lang>] ... body ... [/PREVIEW]
  *   [PREVIEW:document]    ... body ... [/PREVIEW]
- *
- * Why a hand-rolled parser instead of a regex pass: tokens can straddle
- * SSE chunks (e.g. one chunk ends with "[MO", the next begins with
- * "DE:THINKING]"). The parser keeps a tail buffer of bytes that might be
- * the start of a token and only commits them to the chat bubble when it's
- * sure they are not.
  */
 export function useDelphiStream() {
-  const send = useCallback(async (text) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  const send = useCallback(async (input) => {
+    // Accept legacy string-only and new draft-object shape.
+    const draft = normalizeInput(input);
+    const trimmed = draft.text.trim();
+    const images = draft.images;
+    if (!trimmed && images.length === 0) return;
 
     const chat = useChatStore.getState();
     const delphi = useDelphiStore.getState();
 
-    chat.addUserMessage(trimmed);
+    // Record user message in store with attachments so subsequent history
+    // serialization can rebuild the multimodal content array.
+    chat.addUserMessage(
+      trimmed,
+      images.length > 0 ? { attachments: images } : undefined,
+    );
     delphi.clearPreview();
     delphi.setActiveTask(null);
     delphi.setError(null);
     delphi.setMode("THINKING");
     delphi.beginStream();
+    const label = trimmed || `[${images.length} image${images.length > 1 ? "s" : ""}]`;
     delphi.pushEvent(
-      `Query received: "${trimmed.slice(0, 44)}${trimmed.length > 44 ? "…" : ""}"`,
+      `Query received: "${label.slice(0, 44)}${label.length > 44 ? "…" : ""}"`,
     );
     delphi.pushEvent("Dispatching to inference engine…");
 
+    // Build wire-format messages from chatStore history. Each user message
+    // rebuilds its content array from its stored attachments (if any).
     const history = useChatStore.getState().messages.map((m) => ({
       role: m.role,
-      content: m.content,
+      content: buildContent(m),
     }));
 
     // Disable input immediately, but defer creating the assistant bubble
@@ -139,9 +162,91 @@ export function useDelphiStream() {
     }
   }, []);
 
+  /**
+   * transcribe(blob, mimeType) — POST a captured audio blob to the backend's
+   * speech-to-text route. Returns the transcript text (raw, untrimmed) so
+   * the caller can drop it into the textarea for the operator to edit.
+   * Throws on non-2xx — caller surfaces the message inline.
+   */
+  const transcribe = useCallback(async (blob, mimeType) => {
+    if (!blob) throw new Error("transcribe: no audio blob");
+    const filename = filenameFor(mimeType || blob.type);
+    const form = new FormData();
+    form.append("file", blob, filename);
+
+    const resp = await fetch(`${BASE}/v1/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "x-client-id": "delphi-ui",
+      },
+      body: form,
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(
+        `Transcription ${resp.status}: ${summariseErrorBody(body) || resp.statusText}`,
+      );
+    }
+    const data = await resp.json().catch(() => ({}));
+    const text = typeof data?.text === "string" ? data.text : "";
+    return text;
+  }, []);
+
   const cancel = useCallback(() => cancelDelphiStream(), []);
 
-  return { send, cancel };
+  return { send, cancel, transcribe };
+}
+
+/** Normalize the send() argument into a uniform { text, images } shape. */
+function normalizeInput(input) {
+  if (typeof input === "string") {
+    return { text: input, images: [] };
+  }
+  if (input && typeof input === "object") {
+    return {
+      text: typeof input.text === "string" ? input.text : "",
+      images: Array.isArray(input.images) ? input.images : [],
+    };
+  }
+  return { text: "", images: [] };
+}
+
+/**
+ * Build a wire-format `content` for a stored message.
+ *
+ * - Pure-text messages → plain string (back-compat, keeps the simple path
+ *   simple and avoids surprising upstream proxies that don't expect arrays).
+ * - Messages with `attachments` → OpenAI content-array:
+ *     [{type:"text", text}, {type:"image_url", image_url:{url}}, ...]
+ *   Empty text is preserved as an empty text part so the image isn't orphan.
+ */
+function buildContent(msg) {
+  const text = typeof msg.content === "string" ? msg.content : "";
+  const atts = Array.isArray(msg.attachments) ? msg.attachments : [];
+  if (atts.length === 0) return text;
+
+  const parts = [{ type: "text", text }];
+  for (const a of atts) {
+    if (!a?.dataUrl) continue;
+    parts.push({
+      type: "image_url",
+      image_url: { url: a.dataUrl },
+    });
+  }
+  return parts;
+}
+
+/** Pick a sensible filename for the multipart upload from the mime type. */
+function filenameFor(mime) {
+  if (!mime) return "audio.webm";
+  if (mime.includes("webm")) return "audio.webm";
+  if (mime.includes("ogg")) return "audio.ogg";
+  if (mime.includes("mp4") || mime.includes("m4a")) return "audio.m4a";
+  if (mime.includes("wav")) return "audio.wav";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return "audio.mp3";
+  return "audio.bin";
 }
 
 /**
