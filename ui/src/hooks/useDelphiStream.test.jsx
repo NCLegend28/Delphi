@@ -247,4 +247,65 @@ describe("useDelphiStream directive parsing", () => {
       mimeType: "image/png",
     });
   });
+
+  it("preserves the user's mirrored media preview when the assistant opens an unknown PREVIEW kind", async () => {
+    // Regression: small models sometimes emit garbage like "[PREVIEW:image:)"
+    // or "[PREVIEW:snapshot]…[/PREVIEW]". Previously these fell through to
+    // 'document' and clobbered the user's mirrored attachment on stream end.
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockChatResponse(["hello [PREVIEW:image:) garbage [/PREVIEW] done"]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send({
+        text: "what is this?",
+        images: [
+          {
+            mimeType: "image/png",
+            dataUrl: "data:image/png;base64,KEEPME",
+            width: 10,
+            height: 10,
+          },
+        ],
+      });
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toMatchObject({
+      kind: "media",
+      url: "data:image/png;base64,KEEPME",
+    });
+  });
+
+  it("preserves the mirrored media preview when [PREVIEW:document] is opened but never closed", async () => {
+    // Regression: an unclosed preview directive used to commit on flush() and
+    // overwrite whatever preview was already there with the buffered text.
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockChatResponse(["intro [PREVIEW:document]forgot to close"]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send({
+        text: "what is this?",
+        images: [
+          {
+            mimeType: "image/png",
+            dataUrl: "data:image/png;base64,KEEPME2",
+            width: 10,
+            height: 10,
+          },
+        ],
+      });
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toMatchObject({
+      kind: "media",
+      url: "data:image/png;base64,KEEPME2",
+    });
+  });
 });

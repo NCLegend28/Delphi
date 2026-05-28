@@ -394,14 +394,19 @@ export function createTokenParser(onFirstChatChunk) {
   function commitPreview() {
     if (previewMeta) {
       const body = previewBuf.replace(/^\n+|\n+$/g, "");
-      if (previewMeta.kind === "media") {
+      // If the model opened a preview but never emitted [/PREVIEW] before the
+      // stream ended, treat the buffered body as plain chat. This prevents an
+      // unclosed [PREVIEW:document] (or media with no URL) from silently
+      // wiping a valid preview — like the user's mirrored attachment.
+      if (!previewMeta.explicitlyClosed) {
+        if (body) emitChat(body);
+      } else if (previewMeta.kind === "media") {
         const media = parseMediaBody(body);
         if (media.url) {
           delphi.setPreview({ kind: "media", ...media });
         } else if (body) {
-          // Model opened [PREVIEW:media] with no usable URL (common with small
-          // models that hallucinate the directive). Don't swallow the text —
-          // emit it as plain chat so the operator sees what was said.
+          // Closed [PREVIEW:media] but body had no usable URL → keep the
+          // operator informed by surfacing the text.
           emitChat(body);
         }
       } else {
@@ -434,6 +439,7 @@ export function createTokenParser(onFirstChatChunk) {
     }
     if (raw.startsWith("[/PREVIEW")) {
       if (state === "preview") {
+        if (previewMeta) previewMeta.explicitlyClosed = true;
         commitPreview();
         state = "chat";
       }
@@ -444,15 +450,20 @@ export function createTokenParser(onFirstChatChunk) {
       // Strip "[PREVIEW:" and the trailing "]" to get the colon-separated tail.
       const tail = raw.slice("[PREVIEW:".length, -1).trim();
       const parts = tail.split(":");
-      const kind = (parts[0] || "document").toLowerCase();
+      const kind = (parts[0] || "").toLowerCase();
       const language = parts[1]?.trim() || null;
-      let normalizedKind;
-      if (kind === "code") normalizedKind = "code";
-      else if (kind === "media") normalizedKind = "media";
-      else normalizedKind = "document";
+      // Only honor known preview kinds. Anything else (e.g. small-model
+      // hallucinations like "[PREVIEW:image:)" or "[PREVIEW:snapshot]") gets
+      // emitted as plain chat so we don't accidentally clobber the
+      // operator's send-time media mirror with junk buffered until stream end.
+      if (kind !== "code" && kind !== "document" && kind !== "media") {
+        emitChat(raw);
+        return;
+      }
       previewMeta = {
-        kind: normalizedKind,
+        kind,
         language,
+        explicitlyClosed: false,
       };
       previewBuf = "";
       state = "preview";
@@ -534,6 +545,7 @@ export function createTokenParser(onFirstChatChunk) {
         return;
       }
       // Consume "[/PREVIEW...]"
+      if (previewMeta) previewMeta.explicitlyClosed = true;
       commitPreview();
       state = "chat";
       work = remainder.slice(endBracket + 1);
