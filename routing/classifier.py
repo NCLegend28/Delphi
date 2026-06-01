@@ -37,13 +37,37 @@ def _system_prompt() -> str:
     return (
         "You classify a user's chat message into one of these task types: "
         + ", ".join(TASK_TYPES)
-        + ". Reply with ONLY a JSON object — no prose, no code fences — with keys: "
+        + '. Reply with ONLY a JSON object — no prose, no code fences — with keys: '
         '"task_type" (one of the listed types), "confidence" (0.0-1.0), '
-        '"project" (the name of a project the user referenced, or null). '
-        "Use 'code' for any programming task, 'deep_code' only when the message asks "
-        "for a substantial refactor or architecture. Use 'reason' for math, debugging "
-        "logic, or proofs. Use 'multilingual' only when the message mixes languages. "
-        "Use 'vault_query' when the user asks what they already know about something."
+        '"project" (the name of a project the user referenced, or null).\n'
+        "\n"
+        "Rubric:\n"
+        "- 'code' — any programming task: write, fix, refactor, explain code.\n"
+        "- 'deep_code' — substantial refactor, multi-file design, architecture.\n"
+        "- 'reason' — math, proofs, debugging logic, step-by-step deduction.\n"
+        "- 'deep_reason' — hard reasoning that needs a long, careful chain.\n"
+        "- 'multilingual' — the message mixes languages (e.g. English ↔ Spanish).\n"
+        "- 'vault_query' — the answer should come from the user's own notes. "
+        "This covers (a) lookups about anything the user has likely stored "
+        "(GRE vocabulary, study material, personal projects, prior decisions), "
+        "(b) meta-prompts like 'help me study X' / 'quiz me on Y' / "
+        "'what do I have on Z' that imply consulting curated knowledge, and "
+        "(c) explicit asks like 'check my vault' or 'look in my notes'.\n"
+        "- 'chat' — default for general conversation that fits no other type.\n"
+        "\n"
+        "Examples (message → task_type):\n"
+        '  "refactor this Python function" → code\n'
+        '  "redesign the auth layer across services" → deep_code\n'
+        '  "prove that sqrt(2) is irrational" → reason\n'
+        '  "what does perspicacious mean?" → vault_query\n'
+        '  "define laconic" → vault_query\n'
+        '  "help me with my GRE vocabulary" → vault_query\n'
+        '  "quiz me on hard GRE words" → vault_query\n'
+        '  "do I have notes on permutations vs combinations?" → vault_query\n'
+        '  "what was the decision we made about the memory layer?" → vault_query\n'
+        '  "check my vault for anything on FinBERT" → vault_query\n'
+        '  "¿cómo se dice perspicacious en español?" → multilingual\n'
+        '  "hey, how are you" → chat\n'
     )
 
 

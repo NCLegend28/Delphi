@@ -12,7 +12,7 @@ import pytest
 import respx
 
 from proxy.ollama_client import OllamaClient
-from routing.classifier import Classifier, ClassifyResult
+from routing.classifier import Classifier, ClassifyResult, _system_prompt
 from routing.roster import DEFAULT_TASK_TYPE
 
 BASE = "http://ollama.test:11434"
@@ -105,3 +105,49 @@ async def test_empty_project_string_becomes_none(classifier: Classifier) -> None
     result = await classifier.classify("hi")
     assert result.project is None
     await classifier._ollama.aclose()
+
+
+# --- system-prompt rubric -------------------------------------------------
+#
+# The classifier's accuracy lives in the prompt. These tests pin the
+# exemplars so that a future rewrite can't silently drop the vault_query
+# coverage that lets meta-prompts ("help me study X", "quiz me") route
+# to the vault-agent loop. The real-Ollama 80%-accuracy bar is enforced
+# in a separate suite when Ollama is wired into CI.
+
+
+def test_system_prompt_lists_every_task_type() -> None:
+    prompt = _system_prompt()
+    from routing.roster import TASK_TYPES
+
+    for task_type in TASK_TYPES:
+        assert task_type in prompt, f"{task_type} missing from classifier rubric"
+
+
+def test_system_prompt_covers_vault_query_retrieval_exemplars() -> None:
+    prompt = _system_prompt()
+    # Lookup-shaped prompts must teach the classifier to route to vault_query.
+    assert '"what does perspicacious mean?" → vault_query' in prompt
+    assert '"define laconic" → vault_query' in prompt
+
+
+def test_system_prompt_covers_vault_query_meta_exemplars() -> None:
+    """Meta-prompts (study help / quiz me / do I have notes) must reach vault_query.
+
+    These are the exact prompts that were misclassified as 'chat' before
+    Phase 3 landed. Don't let that regress.
+    """
+    prompt = _system_prompt()
+    assert '"help me with my GRE vocabulary" → vault_query' in prompt
+    assert '"quiz me on hard GRE words" → vault_query' in prompt
+    assert '"do I have notes on permutations vs combinations?" → vault_query' in prompt
+
+
+def test_system_prompt_covers_explicit_vault_directive() -> None:
+    prompt = _system_prompt()
+    assert "check my vault" in prompt.lower()
+
+
+def test_system_prompt_keeps_chat_default_for_smalltalk() -> None:
+    prompt = _system_prompt()
+    assert '"hey, how are you" → chat' in prompt

@@ -17,6 +17,8 @@ from routing.soul import (
     CODING_TASK_TYPES,
     UI_CLIENT_IDS,
     UI_PROTOCOL_APPENDIX,
+    VAULT_QUERY_APPENDIX,
+    VAULT_QUERY_TASK_TYPES,
     soul_for,
 )
 
@@ -158,4 +160,45 @@ def test_soul_for_delphi_ui_code_keeps_both_appendices_in_order() -> None:
     coding_idx = out.index(CODING_APPENDIX)
     ui_idx = out.index(UI_PROTOCOL_APPENDIX)
     assert coding_idx < ui_idx, "coding appendix must come before UI appendix"
+    assert out.endswith(UI_PROTOCOL_APPENDIX)
+
+
+# --- vault-query appendix -------------------------------------------------
+
+
+def test_vault_query_appendix_is_nonempty() -> None:
+    assert VAULT_QUERY_APPENDIX.strip()
+
+
+def test_vault_query_task_types_are_a_subset_of_known_task_types() -> None:
+    assert VAULT_QUERY_TASK_TYPES.issubset(set(roster.TASK_TYPES))
+
+
+def test_vault_query_appendix_compels_search_first() -> None:
+    """The MUST-search rule is what forces gpt-oss out of confidence mode."""
+    assert "MUST call ``search_vault``" in VAULT_QUERY_APPENDIX
+
+
+def test_vault_query_appendix_requires_source_citation() -> None:
+    assert "Source:" in VAULT_QUERY_APPENDIX
+
+
+def test_soul_for_vault_query_appends_vault_block() -> None:
+    out = soul_for("vault_query")
+    assert out.startswith(BASE_SOUL), "vault_query must keep the base soul intact"
+    assert out.endswith(VAULT_QUERY_APPENDIX), "vault-query appendix is appended"
+
+
+def test_soul_for_non_vault_query_omits_vault_appendix() -> None:
+    for task_type in ("chat", "code", "reason", "multilingual"):
+        assert VAULT_QUERY_APPENDIX not in soul_for(task_type), task_type
+
+
+def test_soul_for_vault_query_with_ui_keeps_both_appendices_in_order() -> None:
+    out = soul_for("vault_query", client_id="delphi-ui")
+    assert out.startswith(BASE_SOUL)
+    # Vault block must precede the UI block; UI block must be last.
+    vq_idx = out.index(VAULT_QUERY_APPENDIX)
+    ui_idx = out.index(UI_PROTOCOL_APPENDIX)
+    assert vq_idx < ui_idx, "vault-query appendix must come before UI appendix"
     assert out.endswith(UI_PROTOCOL_APPENDIX)
