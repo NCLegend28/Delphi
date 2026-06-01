@@ -6,6 +6,7 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-bash";
 import { useChatStore } from "../../store/chatStore";
 import { useDelphiStore } from "../../store/delphiStore";
+import { useTypewriter } from "../../hooks/useTypewriter";
 
 /**
  * OutputCanvas — the live render surface.
@@ -30,6 +31,13 @@ export function OutputCanvas() {
   // or while the latest assistant message is the one still streaming.
   const awaitingReply = isStreaming && (lastAssistant == null || lastAssistant.id === streamingId);
 
+  // During the "send → first chunk" gap, ``lastAssistant`` still points at the
+  // *previous* turn's reply. Showing it would mean staring at stale text
+  // until the new bubble materializes. Instead, blank the canvas as soon as
+  // the user hits send, so the typewriter starts from empty on the new turn.
+  const currentAssistant =
+    isStreaming && lastAssistant && lastAssistant.id !== streamingId ? null : lastAssistant;
+
   const status = preview
     ? "PREVIEW"
     : isStreaming
@@ -43,7 +51,7 @@ export function OutputCanvas() {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [lastAssistant?.content, lastUser?.id, preview, awaitingReply]);
+  }, [currentAssistant?.content, lastUser?.id, preview, awaitingReply]);
 
   return (
     <div className="panel relative flex h-full min-h-0 flex-col overflow-hidden">
@@ -60,8 +68,16 @@ export function OutputCanvas() {
         {hasExchange || preview ? (
           <div ref={scrollRef} className="relative z-10 mx-auto flex h-full max-w-[760px] flex-col gap-2 overflow-y-auto p-5">
             {lastUser && <QueryBlock text={lastUser.content} />}
-            {(lastAssistant || awaitingReply) && (
-              <OutputBlock text={lastAssistant?.content ?? ""} streaming={awaitingReply} />
+            {(currentAssistant || awaitingReply) && (
+              // ``key`` ensures the typewriter resets cleanly per turn —
+              // when the assistant id changes (or the canvas blanks while
+              // awaiting), React remounts ``OutputBlock`` and its
+              // ``displayed`` state begins at the empty string.
+              <OutputBlock
+                key={currentAssistant?.id ?? `awaiting-${lastUser?.id ?? "none"}`}
+                text={currentAssistant?.content ?? ""}
+                streaming={awaitingReply}
+              />
             )}
             {preview && <PreviewBlock preview={preview} />}
           </div>
@@ -87,12 +103,18 @@ function QueryBlock({ text }) {
 }
 
 function OutputBlock({ text, streaming }) {
+  // Reveal the assistant's text with a typewriter cadence so chunked SSE
+  // arrivals feel like a continuous stream rather than block-paste updates.
+  // The caret stays visible while ``streaming`` is true OR while the reveal
+  // is still catching up to the full text after the stream finished.
+  const displayed = useTypewriter(text);
+  const stillRevealing = displayed.length < text.length;
   return (
     <div className="rounded-[0_4px_4px_0] border border-[var(--color-border-dim)] border-l-2 border-l-[var(--color-accent-cyan)] bg-[var(--color-bg-surface)]/80 px-4 py-3">
       <span className="mb-1.5 block text-[8px] tracking-[0.2em] text-[var(--color-accent-cyan)]">DELPHI OUTPUT ──</span>
       <span className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--color-text-primary)]">
-        {text}
-        {streaming && <Caret />}
+        {displayed}
+        {(streaming || stillRevealing) && <Caret />}
       </span>
     </div>
   );
@@ -133,11 +155,15 @@ function PreviewBlock({ preview }) {
       : preview.kind === "media"
         ? "MEDIA"
         : "DOCUMENT";
+  // Media previews are external references (URL or data URL) — download/copy
+  // affordances don't apply the same way; skip the toolbar for them.
+  const hasToolbar = preview.kind === "code" || preview.kind === "document";
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="text-[8px] tracking-[0.2em] text-[var(--color-accent-amber)]">{label} ──</span>
         <span className="h-px flex-1 bg-[var(--color-border-dim)]" />
+        {hasToolbar && <PreviewToolbar preview={preview} />}
       </div>
       <div className="overflow-auto rounded-sm border border-[var(--color-border-dim)] border-l-2 border-l-[var(--color-accent-amber)] bg-[var(--color-bg-surface)]/80">
         {preview.kind === "code" ? (
@@ -151,6 +177,112 @@ function PreviewBlock({ preview }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Download + Copy affordances for the preview pane.
+ *
+ * Both actions are purely client-side — the preview body already lives in
+ * memory. Save-to-vault is a separate (deferred) task because it needs a
+ * backend endpoint with auth and path validation. */
+function PreviewToolbar({ preview }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(preview.content ?? "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can fail in insecure contexts or when permission is
+      // denied; the failure is silent so the UI doesn't show a useless
+      // error toast. The button stays clickable for the user to retry.
+    }
+  };
+
+  const handleDownload = () => {
+    const { content = "", kind, language } = preview;
+    const ext = downloadExtension(kind, language);
+    const filename = `delphi-preview-${timestampSlug()}.${ext}`;
+    const blob = new Blob([content], { type: mimeForExt(ext) });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    // Some browsers (Safari) need the anchor mounted to honor `download`.
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Defer revocation a tick so the click has a chance to dispatch.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  return (
+    <div className="ml-1 flex items-center gap-1">
+      <ToolbarButton onClick={handleCopy} ariaLabel="Copy preview to clipboard">
+        {copied ? "COPIED" : "COPY"}
+      </ToolbarButton>
+      <ToolbarButton onClick={handleDownload} ariaLabel="Download preview as a file">
+        DOWNLOAD
+      </ToolbarButton>
+    </div>
+  );
+}
+
+function ToolbarButton({ children, onClick, ariaLabel }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className="rounded-sm border border-[var(--color-border-dim)] bg-[var(--color-bg-surface)]/60 px-2 py-0.5 font-mono text-[8px] tracking-[0.2em] text-[var(--color-text-dim)] transition-colors hover:border-[var(--color-accent-amber)] hover:text-[var(--color-accent-amber)]"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Map a preview kind + language to a sensible file extension. */
+function downloadExtension(kind, language) {
+  if (kind === "document") return "md";
+  if (kind !== "code") return "txt";
+  const lang = (language || "").toLowerCase();
+  const table = {
+    python: "py",
+    javascript: "js",
+    typescript: "ts",
+    jsx: "jsx",
+    tsx: "tsx",
+    json: "json",
+    bash: "sh",
+    shell: "sh",
+    markdown: "md",
+    yaml: "yaml",
+    yml: "yaml",
+    html: "html",
+    css: "css",
+    sql: "sql",
+    go: "go",
+    rust: "rs",
+  };
+  return table[lang] ?? "txt";
+}
+
+function mimeForExt(ext) {
+  if (ext === "md") return "text/markdown";
+  if (ext === "json") return "application/json";
+  if (ext === "html") return "text/html";
+  if (ext === "css") return "text/css";
+  return "text/plain";
+}
+
+/** ISO-ish timestamp safe for filenames: 2026-06-01_15-42-08. */
+function timestampSlug() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`
   );
 }
 

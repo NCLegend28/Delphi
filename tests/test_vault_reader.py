@@ -93,3 +93,81 @@ def test_read_truncates_large_note(tmp_path):
     out = reader.read("big.md")
     assert out.endswith("…[truncated]")
     assert len(out) < 1_100
+
+
+# --- path-tier boosts (knowledge/ over conversations/) --------------------
+
+
+@pytest.fixture
+def tiered_vault(tmp_path):
+    """A vault where the same term appears in both a knowledge card and an
+    older conversation note. Used to verify ``knowledge/`` wins.
+
+    The conversation note mentions ``perspicacious`` many times (high raw
+    keyword score) but should still rank below the knowledge card thanks to
+    the ``knowledge/`` path boost.
+    """
+    (tmp_path / "knowledge" / "gre" / "vocab").mkdir(parents=True)
+    (tmp_path / "knowledge" / "gre" / "vocab" / "perspicacious.md").write_text(
+        "# perspicacious\nHaving keen insight; mentally sharp.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "conversations" / "2026-06-01").mkdir(parents=True)
+    (tmp_path / "conversations" / "2026-06-01" / "old-turn.md").write_text(
+        # Stuff the conversation note with the term so raw score is high.
+        "perspicacious perspicacious perspicacious perspicacious perspicacious\n",
+        encoding="utf-8",
+    )
+    return VaultReader(str(tmp_path), max_results=5)
+
+
+def test_knowledge_outranks_conversation_on_same_term(tiered_vault):
+    """Even when a conversation note mentions the term more times, the
+    knowledge card wins — that's the whole point of the tier sort."""
+    hits = tiered_vault.search("perspicacious")
+    assert hits, "expected matches"
+    assert hits[0].path == "knowledge/gre/vocab/perspicacious.md", (
+        f"knowledge/ note should win; got {[h.path for h in hits]}"
+    )
+
+
+def test_knowledge_wins_even_with_pathological_conversation_density(tmp_path):
+    """Strict-tier sort: a fifty-mention conversation note still loses to
+    a single-mention knowledge note. The whole point is provenance, not
+    keyword count."""
+    (tmp_path / "knowledge").mkdir()
+    (tmp_path / "knowledge" / "perspicacious.md").write_text(
+        "perspicacious — keen.\n", encoding="utf-8"
+    )
+    (tmp_path / "conversations").mkdir()
+    (tmp_path / "conversations" / "stuffed.md").write_text(
+        "perspicacious " * 50, encoding="utf-8"
+    )
+    hits = VaultReader(str(tmp_path)).search("perspicacious")
+    assert hits[0].path == "knowledge/perspicacious.md"
+
+
+def test_conversation_note_still_searchable(tiered_vault):
+    """Demotion is via score boost, not exclusion — conversation notes still
+    appear in results so 'what did we decide about X' keeps working."""
+    hits = tiered_vault.search("perspicacious")
+    paths = {h.path for h in hits}
+    assert "conversations/2026-06-01/old-turn.md" in paths
+
+
+def test_zero_overlap_note_not_promoted_by_boost(tmp_path):
+    """A knowledge note that doesn't actually mention the query term must
+    not bubble up just because its path is privileged."""
+    (tmp_path / "knowledge").mkdir()
+    (tmp_path / "knowledge" / "unrelated.md").write_text(
+        "completely different topic\n", encoding="utf-8"
+    )
+    (tmp_path / "conversations").mkdir()
+    (tmp_path / "conversations" / "x.md").write_text(
+        "perspicacious means keen insight\n", encoding="utf-8"
+    )
+    reader = VaultReader(str(tmp_path))
+    hits = reader.search("perspicacious")
+    paths = [h.path for h in hits]
+    assert "knowledge/unrelated.md" not in paths
+    assert paths == ["conversations/x.md"]

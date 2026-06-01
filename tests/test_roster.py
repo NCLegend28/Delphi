@@ -202,3 +202,21 @@ def test_soul_for_vault_query_with_ui_keeps_both_appendices_in_order() -> None:
     ui_idx = out.index(UI_PROTOCOL_APPENDIX)
     assert vq_idx < ui_idx, "vault-query appendix must come before UI appendix"
     assert out.endswith(UI_PROTOCOL_APPENDIX)
+
+
+def test_vault_query_appendix_forbids_citing_conversations() -> None:
+    """The agent must not cite its own past replies as if they were knowledge."""
+    assert "may NOT cite a ``conversations/`` path" in VAULT_QUERY_APPENDIX
+
+
+def test_vault_query_appendix_marks_knowledge_as_canonical() -> None:
+    assert "canonical source" in VAULT_QUERY_APPENDIX
+    assert "knowledge/" in VAULT_QUERY_APPENDIX
+
+
+def test_ui_appendix_requires_preview_for_structured_output() -> None:
+    """Long/structured responses must land in the preview pane, not chat."""
+    assert "required (not optional)" in UI_PROTOCOL_APPENDIX
+    assert "120 words" in UI_PROTOCOL_APPENDIX
+    # The chat-visible portion must be a *short framing*, not the whole doc.
+    assert "short framing" in UI_PROTOCOL_APPENDIX

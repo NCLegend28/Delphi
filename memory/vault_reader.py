@@ -32,6 +32,37 @@ _WORD = re.compile(r"[a-z0-9]+")
 _MAX_NOTE_CHARS = 12_000
 _SNIPPET_RADIUS = 160
 
+# Path-tier ranks. Vault notes carry implicit authority by where they live:
+# ``knowledge/`` is hand-curated reference material (GRE cards, project
+# playbooks); ``projects/`` is the active-work registry; ``entities/`` is
+# the writer's auto-extracted noun stubs; ``daily/`` is the daily rollup;
+# ``conversations/`` is conversational exhaust between you and the model.
+#
+# Tier is the *primary* sort key in ``search`` — a one-match knowledge note
+# outranks a fifty-match conversation note, because the conversation is
+# usually an echo of a prior assistant reply about the same term and citing
+# it as a source means citing yourself. Within a tier, raw keyword score
+# breaks the tie. Conversations remain searchable (the agent may still read
+# one for context) but never bubble to the top against curated material.
+#
+# Order matters: the first matching prefix wins, so list specific paths
+# first. A note whose path matches no prefix gets the default tier 0.
+_PATH_TIERS: tuple[tuple[str, int], ...] = (
+    ("knowledge/", 4),
+    ("projects/", 3),
+    ("entities/", 2),
+    ("daily/", 1),
+    ("conversations/", 0),
+)
+
+
+def _path_tier(rel_path: str) -> int:
+    """Authority rank of the note's location — higher beats lower."""
+    for prefix, tier in _PATH_TIERS:
+        if rel_path.startswith(prefix):
+            return tier
+    return 0
+
 
 @dataclass(frozen=True, slots=True)
 class SearchHit:
@@ -81,10 +112,19 @@ class VaultReader:
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
         """Rank notes by keyword overlap with ``query``; return the top hits.
 
-        Scoring is deliberately simple: term frequency in the body plus a
-        boost for matches in the filename (a note *named* for the topic is a
-        strong signal). Notes with zero matched terms are dropped — no
-        zero-score filler. Ties break toward the more recently modified note.
+        Sort key, in order of dominance:
+        1. **Path tier** — ``knowledge/`` (4) > ``projects/`` (3) >
+           ``entities/`` (2) > ``daily/`` (1) > ``conversations/`` (0).
+           Conversation notes never outrank curated knowledge.
+        2. **Raw keyword score** — term frequency in the body, plus 3× per
+           term that matches the filename (a note named for the topic is a
+           strong signal). Breaks ties within a tier.
+        3. **Modification time** — recency breaks any remaining ties.
+
+        Notes with zero raw matches are dropped. ``SearchHit.score`` carries
+        the raw keyword score (not the tier), so the model sees the same
+        signal a human would for relevance, while ranking still respects
+        provenance.
         """
         vault = self._vault
         if vault is None or not self.available:
@@ -93,25 +133,27 @@ class VaultReader:
         if not terms:
             return []
 
-        scored: list[tuple[int, float, SearchHit]] = []
+        scored: list[tuple[int, int, float, SearchHit]] = []
         for path in self._iter_notes():
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
             body_tokens = _tokenize(text)
-            score = sum(1 for tok in body_tokens if tok in terms)
+            raw_score = sum(1 for tok in body_tokens if tok in terms)
             name_tokens = set(_tokenize(path.stem))
-            score += 3 * len(terms & name_tokens)  # filename hit is worth more
-            if score == 0:
+            raw_score += 3 * len(terms & name_tokens)  # filename hit is worth more
+            if raw_score == 0:
                 continue
             rel = path.relative_to(vault).as_posix()
-            hit = SearchHit(rel, score, self._snippet(text, terms))
-            scored.append((score, path.stat().st_mtime, hit))
+            tier = _path_tier(rel)
+            hit = SearchHit(rel, raw_score, self._snippet(text, terms))
+            scored.append((tier, raw_score, path.stat().st_mtime, hit))
 
-        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        # Tier first, then keyword score, then mtime — all descending.
+        scored.sort(key=lambda t: (t[0], t[1], t[2]), reverse=True)
         cap = limit if limit is not None else self._max_results
-        return [hit for _, _, hit in scored[:cap]]
+        return [hit for _, _, _, hit in scored[:cap]]
 
     def _snippet(self, text: str, terms: set[str]) -> str:
         """A short excerpt centered on the first matched term."""

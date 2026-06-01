@@ -16,6 +16,41 @@ beforeEach(() => {
   useDelphiStore.getState().reset();
 });
 
+describe("OutputCanvas preview toolbar", () => {
+  it("renders DOWNLOAD and COPY buttons for a document preview", () => {
+    useDelphiStore.getState().setPreview({
+      kind: "document",
+      content: "# Heading\n\nSome prose.",
+    });
+    render(<OutputCanvas />);
+    expect(screen.getByLabelText("Download preview as a file")).toBeInTheDocument();
+    expect(screen.getByLabelText("Copy preview to clipboard")).toBeInTheDocument();
+  });
+
+  it("renders DOWNLOAD and COPY buttons for a code preview", () => {
+    useDelphiStore.getState().setPreview({
+      kind: "code",
+      language: "python",
+      content: "print('hi')",
+    });
+    render(<OutputCanvas />);
+    expect(screen.getByLabelText("Download preview as a file")).toBeInTheDocument();
+    expect(screen.getByLabelText("Copy preview to clipboard")).toBeInTheDocument();
+  });
+
+  it("does NOT render the toolbar for a media preview (no body to download)", () => {
+    useDelphiStore.getState().setPreview({
+      kind: "media",
+      url: "data:image/png;base64,AAA",
+      alt: "ok",
+      mimeType: "image/png",
+    });
+    render(<OutputCanvas />);
+    expect(screen.queryByLabelText("Download preview as a file")).toBeNull();
+    expect(screen.queryByLabelText("Copy preview to clipboard")).toBeNull();
+  });
+});
+
 describe("OutputCanvas media preview", () => {
   it("renders an <img> with alt text when mimeType is an image/*", () => {
     useDelphiStore.getState().setPreview({

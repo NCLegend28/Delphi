@@ -56,9 +56,10 @@ from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
 from routing.classifier import Classifier
+from routing.directives import strip_ui_directives
 from routing.resolver import resolve_model
 from routing.roster import Roster
-from routing.soul import soul_for
+from routing.soul import UI_CLIENT_IDS, soul_for
 from routing.vault_agent import run_vault_agent
 from telemetry.logger import RequestLogger
 from telemetry.metrics import Metrics
@@ -366,9 +367,17 @@ async def _handle_vault_query(
         )
     )
 
+    # Persist the *unstripped* text (the conversation note keeps the model's
+    # full output for debugging), but sanitize for non-UI consumers so a
+    # stray ``[MODE:…]`` or ``[PREVIEW:…]`` doesn't bleed into AgentRig /
+    # ``curl`` / Open WebUI output. ``delphi-ui`` parses these on its own.
+    wire_content = (
+        agent.content if client_id in UI_CLIENT_IDS else strip_ui_directives(agent.content)
+    )
+
     if stream_requested:
         return StreamingResponse(
-            _sse_from_text(agent.content),
+            _sse_from_text(wire_content),
             media_type="text/event-stream",
             headers={"X-Request-ID": request_id, "Cache-Control": "no-cache"},
         )
@@ -376,7 +385,7 @@ async def _handle_vault_query(
         content=_openai_response(
             request_id=request_id,
             model=model,
-            content=agent.content,
+            content=wire_content,
             finish_reason="stop",
             token_counts=agent.token_counts,
         ),
