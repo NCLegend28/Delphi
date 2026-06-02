@@ -43,7 +43,11 @@ services:
       LOG_DIR: "/var/log/delphi"
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
     volumes:
-      - vault:/vault
+      # /vault is a host-path bind mount so Syncthing (running on the host)
+      # can keep it in lockstep with the Mac vault — a named Docker volume
+      # is opaque to Syncthing. Container runs as uid 1000 (delphi), so the
+      # host dir must be chowned to 1000:1000 before the stack starts.
+      - ${VAULT_HOST_PATH:-/root/Vault}:/vault
       - logs:/var/log/delphi
     depends_on:
       redis:
@@ -75,7 +79,11 @@ services:
       BOOT_PROBE_ENABLED: "false"
     command: ["arq", "worker.main.WorkerSettings"]
     volumes:
-      - vault:/vault
+      # /vault is a host-path bind mount so Syncthing (running on the host)
+      # can keep it in lockstep with the Mac vault — a named Docker volume
+      # is opaque to Syncthing. Container runs as uid 1000 (delphi), so the
+      # host dir must be chowned to 1000:1000 before the stack starts.
+      - ${VAULT_HOST_PATH:-/root/Vault}:/vault
       - logs:/var/log/delphi
     depends_on:
       redis:
@@ -121,7 +129,12 @@ services:
 
 volumes:
   redis-data:
-  vault:
   logs:
   caddy-data:
   caddy-config:
+  # ``vault`` used to be a named volume here. It is now a host bind mount
+  # (see the ``delphi`` and ``delphi-worker`` ``volumes`` sections) so that
+  # Syncthing on the host can mirror the directory with the Mac vault. The
+  # old ``delphi_vault`` named volume can be deleted once the host path is
+  # populated:
+  #     docker volume rm delphi_vault
