@@ -1,0 +1,38 @@
+---
+type: gre-vocab
+word: {{ word | yaml_scalar }}
+pos: {{ pos | yaml_scalar }}
+difficulty: unset
+tags: {{ tags | yaml_list }}
+sources: {{ sources | yaml_list }}
+n_sources: {{ n_sources }}
+{% if gregmat_group is not none -%}
+gregmat_group: {{ gregmat_group }}
+{% endif -%}
+added: {{ added }}
+review:
+  last_reviewed: null
+  ease: 2.5
+  interval_days: 0
+---
+
+# {{ word }}
+
+{% for line in definition.split('\n') -%}
+> {{ line }}
+{% endfor -%}
+{% for sd in secondary_definitions %}
+{% for line in sd.split('\n') -%}
+> {{ line }}
+{% endfor -%}
+{% endfor %}
+{% if example %}
+## Example
+
+- *{{ example }}*
+{% endif %}
+
+## Confusion set
+
+<!-- Wikilinks to easily-confused or related words go here.
+     The vault-query agent will surface these when you ask about this word. -->
