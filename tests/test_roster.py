@@ -15,13 +15,14 @@ from routing.soul import (
     BASE_SOUL,
     CODING_APPENDIX,
     CODING_TASK_TYPES,
+    GRE_QUIZ_APPENDIX,
+    GRE_QUIZ_TASK_TYPES,
     UI_CLIENT_IDS,
     UI_PROTOCOL_APPENDIX,
     VAULT_QUERY_APPENDIX,
     VAULT_QUERY_TASK_TYPES,
     soul_for,
 )
-
 
 # --- roster ---------------------------------------------------------------
 
@@ -63,11 +64,13 @@ def test_from_config_uses_env_driven_model_tags() -> None:
         delphi_model_deep_code="dcode-x:1",
         delphi_model_deep_reason="dreason-x:1",
         delphi_model_vault_query="vault-x:1",
+        delphi_model_gre_quiz="quiz-x:1",
     )
     r = roster.Roster.from_config(cfg)
     assert r.lookup("chat").model == "chat-x:1"
     assert r.lookup("code").model == "code-x:1"
     assert r.lookup("vault_query").model == "vault-x:1"
+    assert r.lookup("gre_quiz").model == "quiz-x:1"
 
 
 def test_from_config_preserves_per_task_options_and_notes() -> None:
@@ -220,3 +223,63 @@ def test_ui_appendix_requires_preview_for_structured_output() -> None:
     assert "120 words" in UI_PROTOCOL_APPENDIX
     # The chat-visible portion must be a *short framing*, not the whole doc.
     assert "short framing" in UI_PROTOCOL_APPENDIX
+
+
+# --- gre_quiz appendix ---------------------------------------------------
+
+
+def test_gre_quiz_appendix_is_nonempty() -> None:
+    assert GRE_QUIZ_APPENDIX.strip()
+
+
+def test_gre_quiz_task_type_in_roster() -> None:
+    """gre_quiz must be a known task type, not a soul-only string."""
+    assert "gre_quiz" in roster.TASK_TYPES
+    assert GRE_QUIZ_TASK_TYPES.issubset(set(roster.TASK_TYPES))
+
+
+def test_gre_quiz_appendix_documents_grading_rubric() -> None:
+    # The 0-5 scale must surface to the model.
+    for grade in ("0", "1", "2", "3", "4", "5"):
+        assert f"``{grade}``" in GRE_QUIZ_APPENDIX, f"grade {grade} missing from rubric"
+
+
+def test_gre_quiz_appendix_lists_required_tools() -> None:
+    for tool in (
+        "list_due_cards",
+        "record_review",
+        "end_quiz_session",
+        "search_vault",
+        "read_note",
+    ):
+        assert tool in GRE_QUIZ_APPENDIX, f"{tool} missing from appendix"
+
+
+def test_gre_quiz_appendix_warns_against_inflation() -> None:
+    """SM-2 only works if the model grades honestly. The soul must say so."""
+    assert "calibrated" in GRE_QUIZ_APPENDIX.lower()
+
+
+def test_soul_for_gre_quiz_appends_quiz_block() -> None:
+    out = soul_for("gre_quiz")
+    assert out.startswith(BASE_SOUL)
+    assert out.endswith(GRE_QUIZ_APPENDIX)
+
+
+def test_soul_for_non_quiz_omits_quiz_appendix() -> None:
+    for task_type in ("chat", "code", "vault_query", "reason"):
+        assert GRE_QUIZ_APPENDIX not in soul_for(task_type), task_type
+
+
+def test_soul_for_gre_quiz_with_ui_orders_appendices() -> None:
+    out = soul_for("gre_quiz", client_id="delphi-ui")
+    assert out.startswith(BASE_SOUL)
+    quiz_idx = out.index(GRE_QUIZ_APPENDIX)
+    ui_idx = out.index(UI_PROTOCOL_APPENDIX)
+    assert quiz_idx < ui_idx, "quiz appendix must come before UI appendix"
+    assert out.endswith(UI_PROTOCOL_APPENDIX)
+
+
+def test_gre_quiz_appendix_disjoint_from_vault_query() -> None:
+    """vault_query and gre_quiz are distinct protocols; appendices shouldn't overlap."""
+    assert GRE_QUIZ_TASK_TYPES.isdisjoint(VAULT_QUERY_TASK_TYPES)

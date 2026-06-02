@@ -27,6 +27,7 @@ TASK_TYPES: tuple[str, ...] = (
     "deep_code",
     "deep_reason",
     "vault_query",
+    "gre_quiz",
 )
 
 
@@ -52,6 +53,13 @@ TASK_METADATA: dict[str, tuple[dict[str, Any], str]] = {
         {"temperature": 0.4},
         "answering 'do I have notes on X' style questions",
     ),
+    "gre_quiz": (
+        # Lower temp than vault_query because the answers are graded and
+        # the model has to commit to a 0-5 number — drifty sampling here
+        # produces inconsistent grading session-over-session.
+        {"temperature": 0.3},
+        "tool-driven GRE vocab drill; reads + writes the active-quiz state file",
+    ),
 }
 
 
@@ -65,6 +73,9 @@ _FALLBACK_MODELS: dict[str, str] = {
     "deep_code": "qwen2.5-coder:32b",
     "deep_reason": "deepseek-r1:32b",
     "vault_query": "phi4:14b",
+    # Tool-capable; same default as vault_query so a stock build runs the
+    # tutor on the same weights as ad-hoc vault lookups.
+    "gre_quiz": "phi4:14b",
 }
 
 
@@ -142,6 +153,7 @@ class Roster:
             "deep_code": cfg.delphi_model_deep_code,
             "deep_reason": cfg.delphi_model_deep_reason,
             "vault_query": cfg.delphi_model_vault_query,
+            "gre_quiz": cfg.delphi_model_gre_quiz,
         }
         return cls(_build_entries(models))
 

@@ -609,6 +609,29 @@ date, decision, rationale.
   a tool-capable `DELPHI_MODEL_VAULT_QUERY`; if the model ignores the tools the
   answer flows through ungrounded. Still **not** a vector DB — the embedding
   sidecar future hook remains the upgrade path for semantic recall.
+- **2026-06-02** — **`gre_quiz` tutor task type added** (Phase 5 of the GRE
+  knowledge-vault plan). New task type with a dedicated tool-calling agent
+  (`routing/quiz_agent.py`) that exposes `list_due_cards`, `record_review`,
+  and `end_quiz_session` alongside the existing read-only `search_vault` /
+  `read_note`. The agent picks N cards from `knowledge/gre/vocab/` (filtered
+  by `difficulty`, `tags_any`, SM-2 due-date), grades model-side under an
+  SM-2-standard rubric (anything < 3 is a fail, ease floored at 1.3), and
+  writes the new review state back to each card's `review:` frontmatter via
+  `memory/srs.py` + `memory/vocab_card.py` (surgical line-level rewrite,
+  atomic via tempfile + `os.replace` — every other byte of the card is
+  preserved so hand-curated mnemonics and confusion sets don't drift over
+  re-runs). Session state lives at `<vault>/state/active-quiz.md`
+  (`memory/quiz_state.py`) — durable across container restarts, inspectable
+  with `cat`, last-writer-wins single-user. Soul ordering grows: BASE →
+  CODING → VAULT_QUERY → GRE_QUIZ → UI; the GRE_QUIZ appendix teaches the
+  tutor procedure (pick→ask→grade→advance), the grading rubric, and the
+  calibrated-not-generous tone needed for SM-2 to schedule honestly.
+  Rationale: turns the read-only `vault_query` librarian into a writeback
+  tutor without introducing Redis-as-source-of-truth — the cards remain the
+  durable record, the state file is the cursor. Same shape generalizes to
+  any future `knowledge/<domain>/` quiz; rename `gre_quiz` → `quiz` with a
+  `domain` parameter when the second domain (Spanish irregulars, algotrading
+  patterns) arrives. Plan: `docs/plans/2026-06-02-gre-quiz-tutor.md`.
 - **2026-05-25** — **UI reskinned to "Mission Control."** The three-zone JARVIS
   shell (`EnvironmentCanvas` + `PreviewBox` + `HUD`) was replaced by a
   four-region mission-control console (Header / OutputCanvas / COMMS / Sidebar +

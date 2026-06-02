@@ -20,6 +20,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -33,6 +34,7 @@ from api.deps import (
     get_entity_index,
     get_metrics,
     get_ollama,
+    get_quiz_state_store,
     get_request_logger,
     get_roster,
     get_vault,
@@ -42,6 +44,7 @@ from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
 from memory.persist import run_persist
+from memory.quiz_state import QuizStateStore
 from memory.record import (
     AudioPart,
     ConversationRecord,
@@ -57,6 +60,7 @@ from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
 from routing.classifier import Classifier
 from routing.directives import strip_ui_directives
+from routing.quiz_agent import run_quiz_agent
 from routing.resolver import resolve_model
 from routing.roster import Roster
 from routing.soul import UI_CLIENT_IDS, soul_for
@@ -393,6 +397,133 @@ async def _handle_vault_query(
     )
 
 
+async def _handle_gre_quiz(
+    *,
+    request_id: str,
+    t0: int,
+    ollama: OllamaClient,
+    model: str,
+    full_messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    reader: VaultReader,
+    quiz_state_store: QuizStateStore,
+    vault_path: Path,
+    max_steps: int,
+    resolved: Any,
+    record_messages: tuple[Message, ...],
+    soul_injected: bool,
+    client_id: str | None,
+    stream_requested: bool,
+    arq_pool: Any,
+    vault: VaultWriter,
+    request_logger: RequestLogger,
+    entity_index: EntityIndex,
+    metrics: Metrics,
+) -> Any:
+    """Drive the GRE quiz tutor agent, then funnel the answer through the
+    same record → persist → response shape as ``_handle_vault_query``.
+
+    Same non-streaming-during-tool-loop pattern: the model needs to see
+    tool results between turns, so we can't pipe SSE through. The final
+    answer is framed as one OpenAI content chunk for streaming clients.
+    """
+    try:
+        agent = await run_quiz_agent(
+            ollama=ollama,
+            model=model,
+            messages=full_messages,
+            options=options,
+            reader=reader,
+            state_store=quiz_state_store,
+            vault_path=vault_path,
+            client_id=client_id,
+            max_steps=max_steps,
+        )
+    except OllamaError as exc:
+        t2 = time.monotonic_ns()
+        error_record = ConversationRecord(
+            request_id=request_id,
+            messages=record_messages,
+            soul_injected=soul_injected,
+            client_id=client_id,
+            stream_requested=stream_requested,
+            resolved=resolved,
+            assistant_response="",
+            finish_reason="error",
+            truncated=False,
+            timings=Timings(received_ms=0.0, ttft_ms=None, completed_ms=(t2 - t0) / _NS_PER_MS),
+            token_counts=None,
+            error=str(exc),
+            ollama_status=502,
+        )
+        _fire(
+            _enqueue_or_persist(
+                error_record,
+                arq_pool=arq_pool,
+                vault=vault,
+                logger=request_logger,
+                entity_index=entity_index,
+                metrics=metrics,
+            )
+        )
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "error": {"code": "UPSTREAM_ERROR", "message": "ollama upstream failed", "details": {}}
+            },
+            headers={"X-Request-ID": request_id},
+        )
+
+    t2 = time.monotonic_ns()
+    done_record = ConversationRecord(
+        request_id=request_id,
+        messages=(*record_messages, Message(role="assistant", content=agent.content)),
+        soul_injected=soul_injected,
+        client_id=client_id,
+        stream_requested=stream_requested,
+        resolved=resolved,
+        assistant_response=agent.content,
+        finish_reason="stop",
+        truncated=False,
+        timings=Timings(received_ms=0.0, ttft_ms=None, completed_ms=(t2 - t0) / _NS_PER_MS),
+        token_counts=agent.token_counts,
+        error=None,
+        ollama_status=200,
+    )
+    _fire(
+        _enqueue_or_persist(
+            done_record,
+            arq_pool=arq_pool,
+            vault=vault,
+            logger=request_logger,
+            entity_index=entity_index,
+            metrics=metrics,
+        )
+    )
+
+    # Strip UI directives for non-UI clients (same pattern as vault_query).
+    wire_content = (
+        agent.content if client_id in UI_CLIENT_IDS else strip_ui_directives(agent.content)
+    )
+
+    if stream_requested:
+        return StreamingResponse(
+            _sse_from_text(wire_content),
+            media_type="text/event-stream",
+            headers={"X-Request-ID": request_id, "Cache-Control": "no-cache"},
+        )
+    return JSONResponse(
+        content=_openai_response(
+            request_id=request_id,
+            model=model,
+            content=wire_content,
+            finish_reason="stop",
+            token_counts=agent.token_counts,
+        ),
+        headers={"X-Request-ID": request_id},
+    )
+
+
 # --- route ---------------------------------------------------------------
 
 
@@ -410,6 +541,7 @@ async def chat_completions(
     metrics: Metrics = Depends(get_metrics),
     arq_pool: Any = Depends(get_arq_pool),
     reader: VaultReader | None = Depends(get_vault_reader),
+    quiz_state_store: QuizStateStore | None = Depends(get_quiz_state_store),
 ) -> Any:
     request_id = f"req_{ULID()}"
     t0 = time.monotonic_ns()
@@ -442,10 +574,47 @@ async def chat_completions(
         if isinstance(m, dict)
     )
 
+    # gre_quiz → run the tutor agent loop. Reuses the vault_agent's bounded
+    # tool-loop pattern but with three additional tools that read/write the
+    # active-quiz state file and the vocab cards' SRS frontmatter. Falls
+    # through to the plain proxy if the vault isn't mounted (the state
+    # store needs somewhere to live).
+    cfg = get_config()
+    if (
+        cfg.vault_agent_enabled
+        and resolved.task_type == "gre_quiz"
+        and reader is not None
+        and reader.available
+        and quiz_state_store is not None
+    ):
+        return await _handle_gre_quiz(
+            request_id=request_id,
+            t0=t0,
+            ollama=ollama,
+            model=resolved.model,
+            full_messages=full_messages,
+            options=options,
+            reader=reader,
+            quiz_state_store=quiz_state_store,
+            # Pull the vault root from the state store, not Config — get_config()
+            # is lru_cache'd and won't reflect per-test tmp_paths in the tests.
+            vault_path=quiz_state_store.vault_path,
+            max_steps=max(cfg.vault_agent_max_steps, 8),
+            resolved=resolved,
+            record_messages=record_messages,
+            soul_injected=soul_injected,
+            client_id=client_id,
+            stream_requested=stream_requested,
+            arq_pool=arq_pool,
+            vault=vault,
+            request_logger=request_logger,
+            entity_index=entity_index,
+            metrics=metrics,
+        )
+
     # vault_query → run the agentic tool loop over the vault so the answer is
     # grounded in Tali's notes. Falls through to the plain proxy below when the
     # agent is disabled, no reader is mounted, or the vault dir isn't there yet.
-    cfg = get_config()
     if (
         cfg.vault_agent_enabled
         and resolved.task_type == "vault_query"

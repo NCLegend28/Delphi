@@ -73,6 +73,9 @@ class Config(BaseSettings):
     delphi_model_deep_code: str = "qwen2.5-coder:32b"
     delphi_model_deep_reason: str = "deepseek-r1:32b"
     delphi_model_vault_query: str = "phi4:14b"
+    # The gre_quiz tutor needs a tool-capable model — same constraint as
+    # vault_query. Defaults to the same tag so a stock build "just works".
+    delphi_model_gre_quiz: str = "phi4:14b"
     delphi_model_classifier: str = "phi3.5:3.8b"
 
     # When false, ``main.py``'s lifespan skips Ollama/vault probes. Used by

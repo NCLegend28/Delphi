@@ -33,6 +33,7 @@ from api.deps import get_metrics, get_ollama, get_roster
 from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
+from memory.quiz_state import QuizStateStore
 from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient, OllamaError
@@ -58,6 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     request_logger = RequestLogger(cfg.log_dir, cfg.timezone)
     entity_index = EntityIndex(cfg.obsidian_vault_path, threshold=cfg.entity_create_threshold)
     vault_reader = VaultReader(cfg.obsidian_vault_path)
+    quiz_state_store = (
+        QuizStateStore(cfg.obsidian_vault_path) if cfg.obsidian_vault_path else None
+    )
     metrics = Metrics()
 
     # The persist queue is an offload, not a dependency. If the worker is
@@ -79,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.request_logger = request_logger
     app.state.entity_index = entity_index
     app.state.vault_reader = vault_reader
+    app.state.quiz_state_store = quiz_state_store
     app.state.metrics = metrics
     app.state.arq_pool = arq_pool
 

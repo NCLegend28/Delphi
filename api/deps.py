@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import Request
 
 from memory.entities import EntityIndex
+from memory.quiz_state import QuizStateStore
 from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
 from proxy.ollama_client import OllamaClient
@@ -52,6 +53,15 @@ def get_vault_reader(request: Request) -> VaultReader | None:
     vault-query agent and fall back to a normal completion.
     """
     return getattr(request.app.state, "vault_reader", None)
+
+
+def get_quiz_state_store(request: Request) -> QuizStateStore | None:
+    """The active-quiz state store, or ``None`` when no vault is configured.
+
+    Same fail-open posture as ``get_vault_reader`` — a missing store means
+    the chat route falls back from the quiz agent to a plain completion.
+    """
+    return getattr(request.app.state, "quiz_state_store", None)
 
 
 def get_metrics(request: Request) -> Metrics:

@@ -132,14 +132,13 @@ def test_system_prompt_covers_vault_query_retrieval_exemplars() -> None:
 
 
 def test_system_prompt_covers_vault_query_meta_exemplars() -> None:
-    """Meta-prompts (study help / quiz me / do I have notes) must reach vault_query.
+    """Meta-prompts (study help / do I have notes) must reach vault_query.
 
     These are the exact prompts that were misclassified as 'chat' before
     Phase 3 landed. Don't let that regress.
     """
     prompt = _system_prompt()
     assert '"help me with my GRE vocabulary" → vault_query' in prompt
-    assert '"quiz me on hard GRE words" → vault_query' in prompt
     assert '"do I have notes on permutations vs combinations?" → vault_query' in prompt
 
 
@@ -151,3 +150,28 @@ def test_system_prompt_covers_explicit_vault_directive() -> None:
 def test_system_prompt_keeps_chat_default_for_smalltalk() -> None:
     prompt = _system_prompt()
     assert '"hey, how are you" → chat' in prompt
+
+
+def test_system_prompt_covers_gre_quiz_exemplars() -> None:
+    """Phase 5: 'quiz me' / 'drill me' must reach gre_quiz, not vault_query.
+
+    The distinction matters because gre_quiz wires up a different agent
+    (stateful, with grading + writeback). vault_query handles a single
+    lookup; gre_quiz handles the multi-turn drill.
+    """
+    prompt = _system_prompt()
+    assert '"quiz me on 10 hard GRE words" → gre_quiz' in prompt
+    assert '"drill me on canonical GRE vocab" → gre_quiz' in prompt
+    assert '"start a vocab review session" → gre_quiz' in prompt
+
+
+def test_system_prompt_distinguishes_gre_quiz_from_vault_query() -> None:
+    """The rubric must explain *why* gre_quiz is its own bucket.
+
+    Otherwise a future model swap may collapse them and we lose the
+    tutor loop. Pin the wording so the regression is obvious.
+    """
+    prompt = _system_prompt()
+    # The rubric must call out that gre_quiz is multi-turn / drill-shaped.
+    assert "multi-turn" in prompt
+    assert "ask-grade-advance" in prompt

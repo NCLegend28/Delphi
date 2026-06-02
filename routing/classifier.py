@@ -50,9 +50,17 @@ def _system_prompt() -> str:
         "- 'vault_query' — the answer should come from the user's own notes. "
         "This covers (a) lookups about anything the user has likely stored "
         "(GRE vocabulary, study material, personal projects, prior decisions), "
-        "(b) meta-prompts like 'help me study X' / 'quiz me on Y' / "
-        "'what do I have on Z' that imply consulting curated knowledge, and "
+        "(b) meta-prompts like 'help me study X' / 'what do I have on Z' "
+        "that imply consulting curated knowledge, and "
         "(c) explicit asks like 'check my vault' or 'look in my notes'.\n"
+        "- 'gre_quiz' — an *interactive vocab drill* over the user's GRE "
+        "knowledge base. Distinct from vault_query: vault_query answers ONE "
+        "question against the notes; gre_quiz runs a multi-turn ask-grade-"
+        "advance loop. Triggers: 'quiz me', 'drill me', 'run me through N "
+        "words', 'start a vocab review', 'test me on hard words'. Mid-session "
+        "user replies ('next', 'stop', short definitions) also stay in this "
+        "bucket — the model continues the drill rather than dropping back to "
+        "vault_query.\n"
         "- 'chat' — default for general conversation that fits no other type.\n"
         "\n"
         "Examples (message → task_type):\n"
@@ -62,10 +70,14 @@ def _system_prompt() -> str:
         '  "what does perspicacious mean?" → vault_query\n'
         '  "define laconic" → vault_query\n'
         '  "help me with my GRE vocabulary" → vault_query\n'
-        '  "quiz me on hard GRE words" → vault_query\n'
         '  "do I have notes on permutations vs combinations?" → vault_query\n'
         '  "what was the decision we made about the memory layer?" → vault_query\n'
         '  "check my vault for anything on FinBERT" → vault_query\n'
+        '  "quiz me on 10 hard GRE words" → gre_quiz\n'
+        '  "drill me on canonical GRE vocab" → gre_quiz\n'
+        '  "run me through some vocab cards" → gre_quiz\n'
+        '  "start a vocab review session" → gre_quiz\n'
+        "  \"test me on hard words I haven't seen\" → gre_quiz\n"
         '  "¿cómo se dice perspicacious en español?" → multilingual\n'
         '  "hey, how are you" → chat\n'
     )
