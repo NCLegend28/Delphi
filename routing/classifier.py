@@ -56,11 +56,18 @@ def _system_prompt() -> str:
         "- 'gre_quiz' — an *interactive vocab drill* over the user's GRE "
         "knowledge base. Distinct from vault_query: vault_query answers ONE "
         "question against the notes; gre_quiz runs a multi-turn ask-grade-"
-        "advance loop. Triggers: 'quiz me', 'drill me', 'run me through N "
-        "words', 'start a vocab review', 'test me on hard words'. Mid-session "
-        "user replies ('next', 'stop', short definitions) also stay in this "
-        "bucket — the model continues the drill rather than dropping back to "
-        "vault_query.\n"
+        "advance loop. Triggers: 'quiz me', 'drill me', 'give me a quiz', "
+        "'run me through N words', 'start a vocab review', 'test me on hard "
+        "words'. Vague phrasings like 'give me a quiz on my GREs' default "
+        "to this bucket — the drill is the right answer when intent is "
+        "ambiguous between drill and full-test. Mid-session user replies "
+        "('next', 'stop', short definitions) also stay here.\n"
+        "- 'gre_practice_test' — a *full mock-exam style test*: multi-section, "
+        "multi-question, generated as a structured document the user fills "
+        "out and submits for two-model grading. Triggers must be explicit: "
+        "'practice test', 'mock exam', 'full practice section', 'simulate a "
+        "GRE section', 'generate a test', 'grade my answers'. NOT triggered "
+        "by 'quiz me' (that's the drill above).\n"
         "- 'chat' — default for general conversation that fits no other type.\n"
         "\n"
         "Examples (message → task_type):\n"
@@ -78,6 +85,13 @@ def _system_prompt() -> str:
         '  "run me through some vocab cards" → gre_quiz\n'
         '  "start a vocab review session" → gre_quiz\n'
         "  \"test me on hard words I haven't seen\" → gre_quiz\n"
+        '  "can you give me a quiz on my GREs" → gre_quiz\n'
+        '  "let\'s run some drills" → gre_quiz\n'
+        '  "give me a 10-question GRE practice test" → gre_practice_test\n'
+        '  "generate a GRE mock exam" → gre_practice_test\n'
+        '  "I want a full practice section, verbal heavy" → gre_practice_test\n'
+        '  "grade my answers" → gre_practice_test\n'
+        '  "simulate a GRE verbal section" → gre_practice_test\n'
         '  "¿cómo se dice perspicacious en español?" → multilingual\n'
         '  "hey, how are you" → chat\n'
     )

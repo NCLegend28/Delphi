@@ -29,10 +29,12 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 
 from api.audio import router as audio_router
 from api.chat import router as chat_router
+from api.practice_tests import router as practice_tests_router
 from api.deps import get_metrics, get_ollama, get_roster
 from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
+from memory.practice_test import PracticeTestStore
 from memory.quiz_state import QuizStateStore
 from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
@@ -62,6 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     quiz_state_store = (
         QuizStateStore(cfg.obsidian_vault_path) if cfg.obsidian_vault_path else None
     )
+    practice_test_store = (
+        PracticeTestStore(cfg.obsidian_vault_path) if cfg.obsidian_vault_path else None
+    )
     metrics = Metrics()
 
     # The persist queue is an offload, not a dependency. If the worker is
@@ -84,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.entity_index = entity_index
     app.state.vault_reader = vault_reader
     app.state.quiz_state_store = quiz_state_store
+    app.state.practice_test_store = practice_test_store
     app.state.metrics = metrics
     app.state.arq_pool = arq_pool
 
@@ -120,6 +126,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Delphi", version="0.1.0", lifespan=lifespan)
 app.include_router(chat_router)
 app.include_router(audio_router)
+app.include_router(practice_tests_router)
 
 
 # --- public liveness ------------------------------------------------------

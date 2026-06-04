@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import Request
 
 from memory.entities import EntityIndex
+from memory.practice_test import PracticeTestStore
 from memory.quiz_state import QuizStateStore
 from memory.vault import VaultWriter
 from memory.vault_reader import VaultReader
@@ -62,6 +63,16 @@ def get_quiz_state_store(request: Request) -> QuizStateStore | None:
     the chat route falls back from the quiz agent to a plain completion.
     """
     return getattr(request.app.state, "quiz_state_store", None)
+
+
+def get_practice_test_store(request: Request) -> PracticeTestStore | None:
+    """The practice-test store, or ``None`` when no vault is configured.
+
+    The chat route uses this for the gre_practice_test generation branch;
+    the grading endpoint builds its own store from Config (because it
+    doesn't need the FastAPI request object).
+    """
+    return getattr(request.app.state, "practice_test_store", None)
 
 
 def get_metrics(request: Request) -> Metrics:

@@ -7,6 +7,7 @@ import "prismjs/components/prism-bash";
 import { useChatStore } from "../../store/chatStore";
 import { useDelphiStore } from "../../store/delphiStore";
 import { useTypewriter } from "../../hooks/useTypewriter";
+import { PracticeTestPreview } from "./PracticeTestPreview";
 
 /**
  * OutputCanvas — the live render surface.
@@ -154,9 +155,11 @@ function PreviewBlock({ preview }) {
       ? `CODE · ${preview.language ?? "PLAIN"}`.toUpperCase()
       : preview.kind === "media"
         ? "MEDIA"
-        : "DOCUMENT";
-  // Media previews are external references (URL or data URL) — download/copy
-  // affordances don't apply the same way; skip the toolbar for them.
+        : preview.kind === "practice-test"
+          ? "PRACTICE TEST"
+          : "DOCUMENT";
+  // Media + practice-test previews have their own controls; skip the
+  // generic copy/download toolbar for them.
   const hasToolbar = preview.kind === "code" || preview.kind === "document";
   return (
     <div className="flex flex-col gap-2">
@@ -170,6 +173,10 @@ function PreviewBlock({ preview }) {
           <CodeBlock language={preview.language} content={preview.content} />
         ) : preview.kind === "media" ? (
           <MediaBlock url={preview.url} alt={preview.alt} mimeType={preview.mimeType} />
+        ) : preview.kind === "practice-test" ? (
+          <div className="p-4">
+            <PracticeTestPreview testId={preview.testId} fallbackBody={preview.content} />
+          </div>
         ) : (
           <div className="whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-[var(--color-text-primary)]">
             {preview.content}

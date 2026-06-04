@@ -76,6 +76,14 @@ class Config(BaseSettings):
     # The gre_quiz tutor needs a tool-capable model — same constraint as
     # vault_query. Defaults to the same tag so a stock build "just works".
     delphi_model_gre_quiz: str = "phi4:14b"
+    # Practice-test generator + primary grader. Tool-capable required for
+    # generation; the grader prompt is a single JSON-output completion.
+    delphi_model_gre_practice_test: str = "phi4:14b"
+    # Independent secondary grader for the parallel cross-check. Should be a
+    # DIFFERENT tag from the primary — same tag defeats the purpose. When
+    # unset/empty, grading degrades to single-grader mode (the take records
+    # ``secondary_grader=None``).
+    delphi_model_gre_practice_secondary: str = ""
     delphi_model_classifier: str = "phi3.5:3.8b"
 
     # When false, ``main.py``'s lifespan skips Ollama/vault probes. Used by

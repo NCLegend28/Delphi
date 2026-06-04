@@ -609,6 +609,40 @@ date, decision, rationale.
   a tool-capable `DELPHI_MODEL_VAULT_QUERY`; if the model ignores the tools the
   answer flows through ungrounded. Still **not** a vector DB — the embedding
   sidecar future hook remains the upgrade path for semantic recall.
+- **2026-06-03** — **`gre_practice_test` mode added** (Phase 5b of the GRE
+  knowledge-vault plan), rounding the domain from spaced-repetition daily
+  drill (`gre_quiz`) into full mock-exam practice. Generation rides a new
+  tool-calling agent (`routing/practice_test_agent.py`) with three tools:
+  `sample_vocab_cards`, `sample_quant_topics`, `persist_test`, plus the
+  existing read-only `search_vault` / `read_note`. Hybrid question
+  sourcing — vocab + quant pull from `knowledge/gre/`; reading
+  comprehension and harder sentence-equivalence are model-generated.
+  Tests persist as one markdown-with-YAML file each under
+  `knowledge/gre/practice-tests/<test_id>.md` (questions in body, answer
+  key in frontmatter, graded takes appended as `## Take N` sections).
+  Grading happens on a separate endpoint, `POST
+  /v1/practice-tests/<id>/grade`, that runs
+  `memory/cross_grade.cross_grade()` — two grader models in parallel,
+  blind to each other; matching grades pass through with both reasonings,
+  disagreements surface a "second opinion" note per question. The
+  service does NOT pick a winner on disagreement; inflation would
+  re-queue nothing and SM-2 would lie. The UI gains a new
+  `[PREVIEW:practice-test:<test_id>]` directive parsed by
+  `useDelphiStream`; the preview pane renders an editable form
+  (`PracticeTestPreview.jsx`) that POSTs filled answers to the grading
+  endpoint and shows the per-question result with second-opinion badges.
+  Two new env vars: `DELPHI_MODEL_GRE_PRACTICE_TEST` (generator + primary
+  grader) and `DELPHI_MODEL_GRE_PRACTICE_SECONDARY` (cross-check; should
+  differ from the primary). When the secondary is unset or fails the run
+  degrades to single-grader mode and the take records it. Classifier
+  exemplars also tightened so vague "give me a quiz on my GREs"
+  phrasings now route to `gre_quiz` rather than slipping into
+  `vault_query`. Rationale: Phase 5 answered the daily-review question;
+  Phase 5b answers "am I ready for the real test?". The cross-grade
+  primitive in `memory/cross_grade.py` is domain-agnostic and reusable
+  beyond GRE — algotrading signal validation, document review, anywhere
+  "second opinion" beats "one confident one". Plan:
+  `docs/plans/2026-06-03-gre-practice-test.md`.
 - **2026-06-02** — **`gre_quiz` tutor task type added** (Phase 5 of the GRE
   knowledge-vault plan). New task type with a dedicated tool-calling agent
   (`routing/quiz_agent.py`) that exposes `list_due_cards`, `record_review`,

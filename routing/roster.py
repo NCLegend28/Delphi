@@ -28,6 +28,7 @@ TASK_TYPES: tuple[str, ...] = (
     "deep_reason",
     "vault_query",
     "gre_quiz",
+    "gre_practice_test",
 )
 
 
@@ -60,6 +61,13 @@ TASK_METADATA: dict[str, tuple[dict[str, Any], str]] = {
         {"temperature": 0.3},
         "tool-driven GRE vocab drill; reads + writes the active-quiz state file",
     ),
+    "gre_practice_test": (
+        # Generation needs a bit more creative range than quiz grading —
+        # the model is composing question stems from vocab cards, not just
+        # judging right/wrong. Higher than quiz (0.3) but below chat (0.7).
+        {"temperature": 0.5},
+        "tool-driven mock-exam generator + endpoint-driven two-model grader",
+    ),
 }
 
 
@@ -76,6 +84,10 @@ _FALLBACK_MODELS: dict[str, str] = {
     # Tool-capable; same default as vault_query so a stock build runs the
     # tutor on the same weights as ad-hoc vault lookups.
     "gre_quiz": "phi4:14b",
+    # Generation + primary grader. Secondary grader is configured separately
+    # (``Config.delphi_model_gre_practice_secondary``) — there's only one
+    # ``model`` per roster slot, so the secondary travels in Config alone.
+    "gre_practice_test": "phi4:14b",
 }
 
 
@@ -154,6 +166,7 @@ class Roster:
             "deep_reason": cfg.delphi_model_deep_reason,
             "vault_query": cfg.delphi_model_vault_query,
             "gre_quiz": cfg.delphi_model_gre_quiz,
+            "gre_practice_test": cfg.delphi_model_gre_practice_test,
         }
         return cls(_build_entries(models))
 

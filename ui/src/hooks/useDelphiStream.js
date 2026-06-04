@@ -413,6 +413,7 @@ export function createTokenParser(onFirstChatChunk) {
         delphi.setPreview({
           kind: previewMeta.kind,
           language: previewMeta.language ?? null,
+          testId: previewMeta.testId ?? null,
           content: body,
         });
       }
@@ -456,13 +457,23 @@ export function createTokenParser(onFirstChatChunk) {
       // hallucinations like "[PREVIEW:image:)" or "[PREVIEW:snapshot]") gets
       // emitted as plain chat so we don't accidentally clobber the
       // operator's send-time media mirror with junk buffered until stream end.
-      if (kind !== "code" && kind !== "document" && kind !== "media") {
+      if (
+        kind !== "code" &&
+        kind !== "document" &&
+        kind !== "media" &&
+        kind !== "practice-test"
+      ) {
         emitChat(raw);
         return;
       }
+      // ``practice-test`` carries the test_id in the ``language`` slot
+      // (``[PREVIEW:practice-test:<test_id>]``). Keep it under ``testId``
+      // so the PreviewBlock can fetch + render the editable form.
+      const testId = kind === "practice-test" ? language : null;
       previewMeta = {
         kind,
-        language,
+        language: kind === "practice-test" ? null : language,
+        testId,
         explicitlyClosed: false,
       };
       previewBuf = "";

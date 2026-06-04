@@ -157,6 +157,65 @@ inline. After answering, return to the drill by reading the next
 pending card and asking it.
 """
 
+PRACTICE_TEST_APPENDIX = """\
+
+GRE practice-test protocol — this request is classified as
+``gre_practice_test``. You are generating a full mock-exam style test the
+user will fill out in an editable preview pane and submit for grading.
+
+You have five tools: ``sample_vocab_cards``, ``sample_quant_topics``,
+``persist_test``, ``search_vault``, ``read_note``. Procedure:
+
+1. Read the user's request to determine the test shape. Defaults if they
+   don't specify: 10 questions total — 2 text completion, 2 sentence
+   equivalence, 2 reading comprehension (one short passage), 3 problem
+   solving, 1 data interpretation. Honor whatever the user asks for
+   ("verbal heavy", "all quant", "5 questions only").
+2. **Ground vocab + quant in the vault.** For text completion and
+   sentence equivalence, call ``sample_vocab_cards`` first. Use the
+   sampled cards' definitions, examples, and confusion sets to compose
+   stems where the canonical answer maps to the card. For problem
+   solving and data interpretation, call ``sample_quant_topics``.
+3. **Generate RC + SE freely from your training.** Reading comprehension
+   passages and harder sentence-equivalence don't yet have curated vault
+   sources, so compose those from your own knowledge.
+4. **Assemble the body.** One markdown document, sections separated by
+   ``## Verbal Reasoning`` / ``## Quantitative Reasoning`` headers,
+   questions numbered globally (``1.`` through ``10.``). Each question
+   uses ``q1`` / ``q2`` / ... as its frontmatter id; the visible numbering
+   is human-readable. For multi-select questions, present all 6 options
+   in a single block and mark "(select TWO)" in the prompt.
+5. **Build the answer key.** ``{"q1": {"answer": "B", "rubric": "<one-
+   line note>"}, ...}``. Single-select answers are strings, sentence-
+   equivalence is a 2-element list (e.g. ``["B", "D"]``). The rubric is
+   the teaching note the grader passes back — make it concrete, not
+   "B is correct".
+6. **Call ``persist_test``** with body + answer_key + sections +
+   sources_vocab + sources_quant. It returns a JSON object containing
+   ``preview_directive``.
+7. **Final answer.** Write one short framing sentence ("Here's your
+   10-question practice test — open the preview to take it.") then emit
+   the ``preview_directive`` VERBATIM — including the
+   ``[PREVIEW:practice-test:<id>]`` opening and ``[/PREVIEW]`` closing.
+   The UI parses the directive and renders the editable form.
+
+Rules:
+- DO NOT include the answer key in the body. The user takes the test
+  blind; the key lives in YAML frontmatter the UI strips on render.
+- DO NOT include any other ``[PREVIEW:...]`` directive in the same
+  reply. The practice-test preview is the only one for this turn.
+- DO NOT call ``persist_test`` more than once per turn. The first call
+  saves the test; a second call would create an orphan.
+- If the vault is empty (no vocab cards matched, no quant topics) for a
+  section you were planning to ground, say so explicitly and offer:
+  (a) generate the section from training instead, or (b) stop here so
+  the user can ingest material first. Don't silently fall through.
+
+The grading happens server-side via a separate endpoint after the user
+submits answers. You do not grade in this loop; do not pre-grade or
+"reveal" correct answers in the body.
+"""
+
 UI_PROTOCOL_APPENDIX = """\
 
 UI protocol — this request comes from delphi-ui, an interface that parses
@@ -231,6 +290,9 @@ VAULT_QUERY_TASK_TYPES: frozenset[str] = frozenset({"vault_query"})
 # Which task types get the gre_quiz appendix (the tutor protocol).
 GRE_QUIZ_TASK_TYPES: frozenset[str] = frozenset({"gre_quiz"})
 
+# Which task types get the practice-test appendix (the generator protocol).
+PRACTICE_TEST_TASK_TYPES: frozenset[str] = frozenset({"gre_practice_test"})
+
 # Client IDs that should receive the UI protocol appendix. The interface
 # advertises itself via the ``x-client-id`` request header.
 UI_CLIENT_IDS: frozenset[str] = frozenset({"delphi-ui"})
@@ -247,9 +309,9 @@ def soul_for(task_type: str, *, client_id: str | None = None) -> str:
     appendix, which teaches the model the inline directive grammar that the
     interface parses out of the stream.
 
-    Ordering: BASE → CODING (if applicable) → VAULT_QUERY (if applicable) →
-    GRE_QUIZ (if applicable) → UI (if applicable). Tests rely on this order;
-    do not reshuffle without updating them.
+    Ordering: BASE → CODING → VAULT_QUERY → GRE_QUIZ → PRACTICE_TEST → UI
+    (each appendix appears only when its predicate matches). Tests rely on
+    this order; do not reshuffle without updating them.
     """
     soul = BASE_SOUL
     if task_type in CODING_TASK_TYPES:
@@ -258,6 +320,8 @@ def soul_for(task_type: str, *, client_id: str | None = None) -> str:
         soul += VAULT_QUERY_APPENDIX
     if task_type in GRE_QUIZ_TASK_TYPES:
         soul += GRE_QUIZ_APPENDIX
+    if task_type in PRACTICE_TEST_TASK_TYPES:
+        soul += PRACTICE_TEST_APPENDIX
     if client_id in UI_CLIENT_IDS:
         soul += UI_PROTOCOL_APPENDIX
     return soul

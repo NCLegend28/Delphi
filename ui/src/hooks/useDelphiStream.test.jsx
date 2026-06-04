@@ -308,4 +308,30 @@ describe("useDelphiStream directive parsing", () => {
       url: "data:image/png;base64,KEEPME2",
     });
   });
+
+  it("parses [PREVIEW:practice-test:<id>] and stashes the test_id", async () => {
+    // The practice-test directive carries the test id in the slot the code
+    // directive uses for language; the parser must surface it under
+    // ``preview.testId`` so the form component can fetch + render.
+    const body = "# GRE Practice Test\n\n1. The committee's decision was ___\n";
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockChatResponse([
+        "Here is your test. ",
+        `[PREVIEW:practice-test:01HXTEST]\n${body}\n[/PREVIEW]`,
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDelphiStream());
+    await act(async () => {
+      await result.current.send("give me a practice test");
+    });
+
+    const preview = useDelphiStore.getState().preview;
+    expect(preview).toMatchObject({
+      kind: "practice-test",
+      testId: "01HXTEST",
+    });
+    expect(preview.content).toContain("The committee");
+  });
 });
