@@ -7,22 +7,33 @@
 #   2. The state file landed in <vault>/state/active-quiz.md.
 #   3. The first vocab card's review: frontmatter actually changed on disk.
 #
-# Exits non-zero on any unmet expectation so this can be wired into CI later.
-#
-# Required env (or pass via flags):
-#   DELPHI_URL       e.g. https://delphi-1.tail6d29ca.ts.net
-#   DELPHI_TOKEN     bearer token (matches DELPHI_BEARER_TOKEN in compose)
-#   VAULT_HOST_PATH  host path to vault (default /root/Vault)
-#
-# Usage:
-#   DELPHI_URL=https://delphi-1.tail6d29ca.ts.net \
-#   DELPHI_TOKEN=$(doppler secrets get DELPHI_BEARER_TOKEN --plain) \
-#     ./scripts/smoke_gre_quiz.sh
+# Env resolution, in priority order:
+#   1. DELPHI_TOKEN / DELPHI_URL exported in the calling shell
+#   2. DELPHI_BEARER_TOKEN read from ./.env.docker (or ./.env)
+#   3. Hardcoded defaults for DELPHI_URL and VAULT_HOST_PATH
+# Just run ``./scripts/smoke_gre_quiz.sh`` from the repo root on the VM.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+load_env_file() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    # shellcheck disable=SC1090
+    set -a; source "$f"; set +a
+  fi
+}
+load_env_file "$REPO_ROOT/.env.docker" || true
+load_env_file "$REPO_ROOT/.env" || true
+
 URL="${DELPHI_URL:-https://delphi-1.tail6d29ca.ts.net}"
-TOKEN="${DELPHI_TOKEN:?set DELPHI_TOKEN to the bearer token}"
+TOKEN="${DELPHI_TOKEN:-${DELPHI_BEARER_TOKEN:-}}"
+if [[ -z "$TOKEN" ]]; then
+  echo "FAIL: no token — set DELPHI_BEARER_TOKEN in .env.docker (or export DELPHI_TOKEN)" >&2
+  exit 1
+fi
 VAULT="${VAULT_HOST_PATH:-/root/Vault}"
 
 bold=$(tput bold 2>/dev/null || true)

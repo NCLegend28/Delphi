@@ -8,15 +8,42 @@
 #   3. POST /v1/practice-tests/<id>/grade returns a graded result, the
 #      test file gains a "## Take N" section, two graders ran in parallel.
 #
-# Required env:
-#   DELPHI_URL       e.g. https://delphi-1.tail6d29ca.ts.net
-#   DELPHI_TOKEN     bearer token
-#   VAULT_HOST_PATH  host path to vault (default /root/Vault)
+# Env resolution, in priority order:
+#   1. DELPHI_TOKEN / DELPHI_URL exported in the calling shell
+#   2. DELPHI_BEARER_TOKEN read from ./.env.docker (or ./.env)
+#   3. Hardcoded defaults for DELPHI_URL and VAULT_HOST_PATH
+# So you can just run ``./scripts/smoke_practice_test.sh`` from the
+# project root on the VM — no Doppler or env juggling needed.
 
 set -euo pipefail
 
+# Locate repo root (this script's parent's parent) so it can be invoked
+# from anywhere on the VM, not just from /root/Delphi.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Slurp .env.docker (preferred for the compose deploy) or .env, picking up
+# DELPHI_BEARER_TOKEN at minimum. We do this with set -a so every assigned
+# var auto-exports; the file is shell-syntax-compatible by convention.
+load_env_file() {
+  local f="$1"
+  if [[ -f "$f" ]]; then
+    # shellcheck disable=SC1090
+    set -a; source "$f"; set +a
+    echo "loaded $f"
+  fi
+}
+load_env_file "$REPO_ROOT/.env.docker" || true
+load_env_file "$REPO_ROOT/.env" || true
+
 URL="${DELPHI_URL:-https://delphi-1.tail6d29ca.ts.net}"
-TOKEN="${DELPHI_TOKEN:?set DELPHI_TOKEN}"
+# Accept either DELPHI_TOKEN (smoke-script convention) or the canonical
+# DELPHI_BEARER_TOKEN from .env.docker.
+TOKEN="${DELPHI_TOKEN:-${DELPHI_BEARER_TOKEN:-}}"
+if [[ -z "$TOKEN" ]]; then
+  echo "FAIL: no token — set DELPHI_BEARER_TOKEN in .env.docker (or export DELPHI_TOKEN)" >&2
+  exit 1
+fi
 VAULT="${VAULT_HOST_PATH:-/root/Vault}"
 
 bold=$(tput bold 2>/dev/null || true)
