@@ -17,6 +17,8 @@ from routing.soul import (
     CODING_TASK_TYPES,
     GRE_QUIZ_APPENDIX,
     GRE_QUIZ_TASK_TYPES,
+    PRACTICE_TEST_APPENDIX,
+    PRACTICE_TEST_TASK_TYPES,
     UI_CLIENT_IDS,
     UI_PROTOCOL_APPENDIX,
     VAULT_QUERY_APPENDIX,
@@ -283,3 +285,60 @@ def test_soul_for_gre_quiz_with_ui_orders_appendices() -> None:
 def test_gre_quiz_appendix_disjoint_from_vault_query() -> None:
     """vault_query and gre_quiz are distinct protocols; appendices shouldn't overlap."""
     assert GRE_QUIZ_TASK_TYPES.isdisjoint(VAULT_QUERY_TASK_TYPES)
+
+
+# --- practice-test appendix ----------------------------------------------
+
+
+def test_practice_test_appendix_is_nonempty() -> None:
+    assert PRACTICE_TEST_APPENDIX.strip()
+
+
+def test_practice_test_task_types_in_roster() -> None:
+    assert "gre_practice_test" in roster.TASK_TYPES
+    assert PRACTICE_TEST_TASK_TYPES.issubset(set(roster.TASK_TYPES))
+
+
+def test_practice_test_appendix_compels_persist_call() -> None:
+    """The MUST-call-persist_test rule is what guards against tool-ignored runs."""
+    assert "MUST" in PRACTICE_TEST_APPENDIX
+    assert "persist_test" in PRACTICE_TEST_APPENDIX
+
+
+def test_practice_test_appendix_forbids_document_preview() -> None:
+    """The model must use [PREVIEW:practice-test:…], not [PREVIEW:document]."""
+    assert "[PREVIEW:document]" in PRACTICE_TEST_APPENDIX  # mentioned in the forbidding sentence
+    assert "MUST NOT" in PRACTICE_TEST_APPENDIX
+    assert "[PREVIEW:practice-test:" in PRACTICE_TEST_APPENDIX
+
+
+def test_practice_test_appendix_forbids_inline_answer_key() -> None:
+    """Inline answers in the body break the user-takes-test-blind contract."""
+    assert "answer key" in PRACTICE_TEST_APPENDIX.lower()
+    # Specifically the forbid clause — markdown emphasis allowed around MUST NOT.
+    assert "include the answer key" in PRACTICE_TEST_APPENDIX
+    assert "MUST NOT" in PRACTICE_TEST_APPENDIX
+
+
+def test_soul_for_practice_test_appends_block() -> None:
+    out = soul_for("gre_practice_test")
+    assert out.startswith(BASE_SOUL)
+    assert out.endswith(PRACTICE_TEST_APPENDIX)
+
+
+def test_soul_for_non_practice_test_omits_appendix() -> None:
+    for task_type in ("chat", "code", "vault_query", "gre_quiz"):
+        assert PRACTICE_TEST_APPENDIX not in soul_for(task_type), task_type
+
+
+def test_soul_for_practice_test_with_ui_orders_appendices() -> None:
+    out = soul_for("gre_practice_test", client_id="delphi-ui")
+    pt_idx = out.index(PRACTICE_TEST_APPENDIX)
+    ui_idx = out.index(UI_PROTOCOL_APPENDIX)
+    assert pt_idx < ui_idx, "practice-test appendix must come before UI appendix"
+    assert out.endswith(UI_PROTOCOL_APPENDIX)
+
+
+def test_practice_test_disjoint_from_other_special_tasks() -> None:
+    assert PRACTICE_TEST_TASK_TYPES.isdisjoint(VAULT_QUERY_TASK_TYPES)
+    assert PRACTICE_TEST_TASK_TYPES.isdisjoint(GRE_QUIZ_TASK_TYPES)

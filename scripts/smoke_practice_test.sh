@@ -33,8 +33,14 @@ load_env_file() {
     echo "loaded $f"
   fi
 }
-load_env_file "$REPO_ROOT/.env.docker" || true
-load_env_file "$REPO_ROOT/.env" || true
+# Prefer .env.docker (the compose deploy). Only fall back to .env if .env.docker
+# is absent — otherwise stale bare-metal config in .env would shadow the real
+# compose values (e.g. wrong DELPHI_BEARER_TOKEN → 401 from Caddy).
+if [[ -f "$REPO_ROOT/.env.docker" ]]; then
+  load_env_file "$REPO_ROOT/.env.docker"
+elif [[ -f "$REPO_ROOT/.env" ]]; then
+  load_env_file "$REPO_ROOT/.env"
+fi
 
 URL="${DELPHI_URL:-https://delphi-1.tail6d29ca.ts.net}"
 # Accept either DELPHI_TOKEN (smoke-script convention) or the canonical
@@ -54,7 +60,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # --- 1. Generation -------------------------------------------------------
 step "1/4  Generate a 3-question practice test"
-RESPONSE=$(curl -sS -X POST "$URL/v1/chat/completions" \
+# Capture status separately so a non-2xx is surfaced before JSON parsing tries
+# and fails on an HTML error page.
+HTTP_CODE=$(curl -sS -o /tmp/gre_resp.txt -w "%{http_code}" -X POST "$URL/v1/chat/completions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "x-client-id: delphi-ui" \
@@ -63,12 +71,27 @@ RESPONSE=$(curl -sS -X POST "$URL/v1/chat/completions" \
         "stream": false,
         "messages": [{"role":"user","content":"give me a 3-question GRE practice test, vocab-heavy"}]
       }')
+RESPONSE=$(cat /tmp/gre_resp.txt)
+
+if [[ "$HTTP_CODE" != "200" ]]; then
+  echo "Server returned HTTP $HTTP_CODE. Body:"
+  echo "----"
+  echo "$RESPONSE" | head -20
+  echo "----"
+  case "$HTTP_CODE" in
+    401) fail "401 — DELPHI_BEARER_TOKEN mismatch (check Caddy vs container env)";;
+    404) fail "404 — endpoint missing; did you rebuild the image after the Phase 5b commit?";;
+    502) fail "502 — upstream Ollama error; check DELPHI_MODEL_GRE_PRACTICE_TEST is a real cloud tag";;
+    503) fail "503 — vault not configured; check OBSIDIAN_VAULT_PATH inside the container";;
+    *)   fail "unexpected HTTP $HTTP_CODE";;
+  esac
+fi
 
 echo "$RESPONSE" | python3 -c '
 import json, sys
 body = json.load(sys.stdin)
 print(body["choices"][0]["message"]["content"][:400])
-' || fail "generation request errored"
+' || { echo "Raw body: $RESPONSE"; fail "response was 200 but not JSON-shaped"; }
 
 # Extract test_id from the [PREVIEW:practice-test:<id>] directive.
 TEST_ID=$(echo "$RESPONSE" | python3 -c '
