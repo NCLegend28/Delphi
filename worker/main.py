@@ -29,6 +29,7 @@ from memory.persist import run_persist
 from memory.vault import VaultWriter
 from telemetry.logger import RequestLogger, configure_stdlib_logging
 from telemetry.metrics import Metrics
+from telemetry.notify import Notifier
 from worker.queue import PERSIST_JOB, redis_settings
 from worker.serde import from_payload
 
@@ -47,6 +48,7 @@ async def persist_exchange(ctx: dict[str, Any], payload: dict[str, Any]) -> None
             logger=ctx["request_logger"],
             entity_index=ctx["entity_index"],
             metrics=ctx["metrics"],
+            notifier=ctx["notifier"],
         )
     except Exception as exc:
         log.error("persist_failed", request_id=record.request_id, error=str(exc))
@@ -61,6 +63,9 @@ async def startup(ctx: dict[str, Any]) -> None:
         cfg.obsidian_vault_path, threshold=cfg.entity_create_threshold
     )
     ctx["metrics"] = Metrics()
+    # The worker is the normal persist path, so vault-write-failure alerts fire
+    # from here. Same fail-open posture: a disabled notifier is a no-op.
+    ctx["notifier"] = Notifier.from_config(cfg)
     # Normal-path metrics live here; Prometheus scrapes this alongside the
     # gateway's /metrics (which carries only the Redis-down fallback path).
     start_http_server(cfg.worker_metrics_port, registry=ctx["metrics"].registry)
@@ -68,6 +73,9 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    notifier = ctx.get("notifier")
+    if notifier is not None:
+        await notifier.aclose()
     log.info("worker_shutdown")
 
 

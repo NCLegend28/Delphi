@@ -22,6 +22,12 @@ TaskType = str
 
 ResolutionSource = Literal["explicit_model", "explicit_task", "classified", "default"]
 
+# Magic model strings that mean "no model — run the classifier."
+# Lets clients that always set ``model`` (Odysseus, Open WebUI, the OpenAI
+# SDK) opt into Delphi's classifier+routing without omitting the field.
+# Comparison is case-insensitive on the stripped value.
+AUTO_MODEL_ALIASES: frozenset[str] = frozenset({"auto", "delphi-auto", "delphi:auto"})
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedModel:
@@ -94,12 +100,16 @@ async def resolve_model(
     explicit_model = request_body.get("model")
     if isinstance(explicit_model, str) and explicit_model.strip():
         model = explicit_model.strip()
-        reversed_task = roster.reverse_lookup(model)
-        return ResolvedModel(
-            model=model,
-            task_type=reversed_task or DEFAULT_TASK_TYPE,
-            source="explicit_model",
-        )
+        # "auto"-style aliases are not real Ollama tags — they're a sentinel
+        # meaning "please classify". Fall through to case 2/3 as if ``model``
+        # were absent, while leaving the original request body untouched.
+        if model.lower() not in AUTO_MODEL_ALIASES:
+            reversed_task = roster.reverse_lookup(model)
+            return ResolvedModel(
+                model=model,
+                task_type=reversed_task or DEFAULT_TASK_TYPE,
+                source="explicit_model",
+            )
 
     # --- Case 2: explicit valid task_type ---
     explicit_task = request_body.get("task_type")

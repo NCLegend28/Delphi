@@ -21,6 +21,7 @@ from routing.classifier import Classifier
 from routing.roster import Roster
 from telemetry.logger import RequestLogger
 from telemetry.metrics import Metrics
+from telemetry.notify import Notifier
 
 
 def get_classifier(request: Request) -> Classifier:
@@ -77,6 +78,16 @@ def get_practice_test_store(request: Request) -> PracticeTestStore | None:
 
 def get_metrics(request: Request) -> Metrics:
     return request.app.state.metrics
+
+
+def get_notifier(request: Request) -> Notifier | None:
+    """The ntfy notifier, or ``None`` when unset (minimal test apps).
+
+    Returns ``None`` rather than raising so persist runs notification-free in
+    tests and any app that didn't build one — same fail-open posture as the
+    other optional components.
+    """
+    return getattr(request.app.state, "notifier", None)
 
 
 def get_arq_pool(request: Request) -> Any:

@@ -609,6 +609,36 @@ date, decision, rationale.
   a tool-capable `DELPHI_MODEL_VAULT_QUERY`; if the model ignores the tools the
   answer flows through ungrounded. Still **not** a vector DB — the embedding
   sidecar future hook remains the upgrade path for semantic recall.
+- **2026-06-07** — **Delphi becomes the architecture; Odysseus is now the
+  chassis.** The "Delphi as a service the rest of the stack calls" frame
+  was wrong — Delphi isn't a model, she's the entire being. Today she
+  moves into the Odysseus codebase: the routing/, memory/, telemetry/,
+  proxy/ modules and the bounded vault_query / gre_quiz /
+  gre_practice_test agents are ported under
+  `odysseus/src/delphi/` (imports rewritten; all 24 modules import
+  clean). A single integration shim at `odysseus/src/delphi_pipeline.py`
+  exposes the three-call public API
+  (`resolve_for_request` / `inject_soul` / `persist_exchange`) and
+  documents the exact patch every Odysseus LLM call site needs to adopt
+  the Delphi pipeline. The user-visible app is rebranded **Delphi**;
+  upstream attribution to Odysseus stays. The standalone Delphi service
+  on the Proxmox VM is unchanged — it remains a failover brain reachable
+  over Tailscale. The classifier+roster+soul+vault+JSONL-logger contract
+  is preserved verbatim; the only loss is the FastAPI HTTP layer, which
+  isn't needed when chat already enters via Odysseus's own routes.
+  Plan: `docs/plans/2026-06-07-delphi-becomes-the-architecture.md`.
+  This session shipped Phases 0–1 + 3 (plan, port, shim, rebrand);
+  Phases 2/4/5 (chat_routes patch, RAG auto-index, Gmail OAuth,
+  per-feature wiring, end-to-end smoke test) are documented and
+  scheduled.
+- **2026-05-24** — **`delphi-auto` magic-model alias.** The resolver now
+  treats `model ∈ {"auto","delphi-auto","delphi:auto"}` as "no explicit
+  model — run the classifier." Lets clients that always send a `model`
+  field (Odysseus, OpenAI SDK, Open WebUI) opt into classification
+  without code changes. Originally added for the discarded
+  "Delphi-as-endpoint-inside-Odysseus" plan; kept because it's useful
+  for any external caller, including the standalone Delphi service the
+  Proxmox VM continues to expose.
 - **2026-06-03** — **`gre_practice_test` mode added** (Phase 5b of the GRE
   knowledge-vault plan), rounding the domain from spaced-repetition daily
   drill (`gre_quiz`) into full mock-exam practice. Generation rides a new
@@ -681,6 +711,38 @@ date, decision, rationale.
   Telemetry is real where it can be (TTFT, stream t/s, token estimates, event
   feed); the SIGNAL bar is explicitly decorative. No backend or multi-tenancy
   change. See `ui/CLAUDE.md` for the component map.
+- **2026-06-18** — **ntfy push notifications** (`telemetry/notify.py`). Delphi's
+  failures previously lived only in the JSONL log, which nobody watches; the
+  `Notifier` turns the human-worthy ones into a push via an ntfy server. Design
+  matches the rest of `telemetry/`: one shared async `httpx.AsyncClient`,
+  fail-open (`send()` never raises — errors go to the same fallback structlog
+  logger as `RequestLogger`), and a `disabled` property (empty base URL or
+  default topic) so call sites need no guards. Publishes via ntfy's JSON
+  endpoint rather than header-encoding, because the approval hook needs action
+  buttons. Dumb `Notification`/`Action` dataclasses carry the *what*; semantic
+  helpers (`ops_alert`, `vault_write_failed`, `gre_due`, `job_done`,
+  `approval_request`) hold the policy (priority, emoji tag, topic) so call sites
+  stay one-liners. Topic routing is per event-class — ops / gre / jobs /
+  approvals each get their own topic (falling back to a default) so Tali can
+  mute one stream without losing another. Built via `Notifier.from_config(cfg)`
+  (same pattern as `Roster.from_config`) and stashed on `app.state` /
+  threaded through `run_persist(..., notifier=…)`. The vault-write-failure
+  alert fires from inside `run_persist`, which runs **off** the request path
+  (fire-and-forget `_fire()` on the gateway, or out-of-process on the arq
+  worker) — so a slow/blocked ntfy call can never touch a client's latency. The
+  worker is the normal persist path and builds its own notifier in `startup`;
+  the gateway threads one through for the inline (`worker_enabled=false` /
+  Redis-down) fallback. Enqueued (worker-bound) records do NOT serialize the
+  notifier — the worker reconstructs it from Config. Config: `NTFY_BASE_URL`,
+  `NTFY_TOKEN`, `NTFY_DEFAULT_TOPIC`, `NTFY_TOPIC_{OPS,GRE,JOBS,APPROVALS}` —
+  all empty by default, so a stock build ships with notifications off. Boot
+  probe failures (Ollama unreachable, vault unwritable) now also fire a
+  `critical` ops alert before `SystemExit`. Public ntfy.sh caveat: the topic
+  name is the only access control, so self-host behind Tailscale for ops alerts
+  that leak infra state. The `gre_due` / `job_done` / `approval_request`
+  helpers are wired but not yet called from a scheduler/agent — they're the
+  documented seam for the spaced-repetition nudge, long deep_* job completion,
+  and the future function-calling approval loop respectively.
 
 ---
 

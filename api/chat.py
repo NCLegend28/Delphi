@@ -33,6 +33,7 @@ from api.deps import (
     get_classifier,
     get_entity_index,
     get_metrics,
+    get_notifier,
     get_ollama,
     get_practice_test_store,
     get_quiz_state_store,
@@ -70,6 +71,7 @@ from routing.soul import UI_CLIENT_IDS, soul_for
 from routing.vault_agent import run_vault_agent
 from telemetry.logger import RequestLogger
 from telemetry.metrics import Metrics
+from telemetry.notify import Notifier
 from worker.queue import PERSIST_JOB
 from worker.serde import to_payload
 
@@ -211,6 +213,7 @@ async def _enqueue_or_persist(
     logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
+    notifier: Notifier | None = None,
 ) -> None:
     """Hand the finished exchange to the worker, or persist it inline if we can't.
 
@@ -231,7 +234,12 @@ async def _enqueue_or_persist(
             )
 
     await run_persist(
-        record, vault=vault, logger=logger, entity_index=entity_index, metrics=metrics
+        record,
+        vault=vault,
+        logger=logger,
+        entity_index=entity_index,
+        metrics=metrics,
+        notifier=notifier,
     )
 
 
@@ -299,6 +307,7 @@ async def _handle_vault_query(
     request_logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
+    notifier: Notifier | None,
 ) -> Any:
     """Run the vault agent, then feed its answer through the same record →
     persist → response machinery the streaming path uses. Non-streaming during
@@ -337,6 +346,7 @@ async def _handle_vault_query(
                 logger=request_logger,
                 entity_index=entity_index,
                 metrics=metrics,
+                notifier=notifier,
             )
         )
         return JSONResponse(
@@ -371,6 +381,7 @@ async def _handle_vault_query(
             logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
     )
 
@@ -422,6 +433,7 @@ async def _handle_gre_quiz(
     request_logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
+    notifier: Notifier | None,
 ) -> Any:
     """Drive the GRE quiz tutor agent, then funnel the answer through the
     same record → persist → response shape as ``_handle_vault_query``.
@@ -467,6 +479,7 @@ async def _handle_gre_quiz(
                 logger=request_logger,
                 entity_index=entity_index,
                 metrics=metrics,
+                notifier=notifier,
             )
         )
         return JSONResponse(
@@ -501,6 +514,7 @@ async def _handle_gre_quiz(
             logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
     )
 
@@ -549,6 +563,7 @@ async def _handle_practice_test(
     request_logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
+    notifier: Notifier | None,
 ) -> Any:
     """Drive the practice-test generation agent and frame the final answer."""
     try:
@@ -587,6 +602,7 @@ async def _handle_practice_test(
                 logger=request_logger,
                 entity_index=entity_index,
                 metrics=metrics,
+                notifier=notifier,
             )
         )
         return JSONResponse(
@@ -621,6 +637,7 @@ async def _handle_practice_test(
             logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
     )
 
@@ -665,6 +682,7 @@ async def chat_completions(
     entity_index: EntityIndex = Depends(get_entity_index),
     metrics: Metrics = Depends(get_metrics),
     arq_pool: Any = Depends(get_arq_pool),
+    notifier: Notifier | None = Depends(get_notifier),
     reader: VaultReader | None = Depends(get_vault_reader),
     quiz_state_store: QuizStateStore | None = Depends(get_quiz_state_store),
     practice_test_store: PracticeTestStore | None = Depends(get_practice_test_store),
@@ -733,6 +751,7 @@ async def chat_completions(
             request_logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
 
     # gre_quiz → run the tutor agent loop. Reuses the vault_agent's bounded
@@ -770,6 +789,7 @@ async def chat_completions(
             request_logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
 
     # vault_query → run the agentic tool loop over the vault so the answer is
@@ -800,6 +820,7 @@ async def chat_completions(
             request_logger=request_logger,
             entity_index=entity_index,
             metrics=metrics,
+            notifier=notifier,
         )
 
     # Open the upstream stream eagerly so we can detect 502s before committing
@@ -841,6 +862,7 @@ async def chat_completions(
                 logger=request_logger,
                 entity_index=entity_index,
                 metrics=metrics,
+                notifier=notifier,
             )
         )
         return JSONResponse(
@@ -905,6 +927,7 @@ async def chat_completions(
                     logger=request_logger,
                     entity_index=entity_index,
                     metrics=metrics,
+                    notifier=notifier,
                 )
             )
 

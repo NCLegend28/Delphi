@@ -50,6 +50,24 @@ class Config(BaseSettings):
     vault_agent_enabled: bool = True
     vault_agent_max_steps: int = 5
 
+    # --- Notifications (ntfy) ---
+    # Push alerts via an ntfy server. ``base_url`` empty OR ``default_topic``
+    # empty disables notifications entirely (Notifier.disabled → every send is
+    # a no-op, so call sites need no guard). Use ntfy.sh with unguessable topic
+    # names, or self-host the binary behind Tailscale (preferred for ops alerts
+    # that leak infra state — the topic name is the only access control on the
+    # public server). ``token`` is the bearer for a self-hosted server with
+    # auth; empty for the public server. The per-event topics fall back to
+    # ``default_topic`` when left empty, so a stock build can point everything
+    # at one channel and split them out later.
+    ntfy_base_url: str = ""
+    ntfy_token: str = ""
+    ntfy_default_topic: str = ""
+    ntfy_topic_ops: str = ""
+    ntfy_topic_gre: str = ""
+    ntfy_topic_jobs: str = ""
+    ntfy_topic_approvals: str = ""
+
     # --- Worker / queue ---
     # The persist pipeline (entity extraction, vault write, JSONL log, metrics)
     # runs out-of-process on the worker, fed by a Redis-backed arq queue. When

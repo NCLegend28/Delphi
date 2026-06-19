@@ -43,6 +43,7 @@ from routing.classifier import Classifier
 from routing.roster import Roster
 from telemetry.logger import RequestLogger, configure_stdlib_logging
 from telemetry.metrics import Metrics
+from telemetry.notify import Notifier
 from worker.queue import create_persist_pool
 
 log = structlog.get_logger("delphi.main")
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         PracticeTestStore(cfg.obsidian_vault_path) if cfg.obsidian_vault_path else None
     )
     metrics = Metrics()
+    notifier = Notifier.from_config(cfg)
 
     # The persist queue is an offload, not a dependency. If the worker is
     # enabled but Redis is down, fall back to inline persist (the chat route
@@ -92,12 +94,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.practice_test_store = practice_test_store
     app.state.metrics = metrics
     app.state.arq_pool = arq_pool
+    app.state.notifier = notifier
 
     if cfg.boot_probe_enabled:
         try:
             available = await ollama.list_models()
         except OllamaError as exc:
             log.error("ollama_unreachable", error=str(exc), base_url=cfg.ollama_base_url)
+            await notifier.ops_alert(
+                f"Boot aborted: Ollama unreachable at {cfg.ollama_base_url} ({exc}).",
+                critical=True,
+            )
             raise SystemExit(f"Ollama unreachable at {cfg.ollama_base_url}: {exc}") from exc
 
         required = set(roster.all_models()) | {cfg.delphi_model_classifier}
@@ -110,8 +117,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             vault_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             log.error("vault_path_unwritable", path=str(vault_dir), error=str(exc))
+            await notifier.ops_alert(
+                f"Boot aborted: vault path not writable ({vault_dir}): {exc}.",
+                critical=True,
+            )
             raise SystemExit(f"Vault path not writable: {vault_dir}: {exc}") from exc
         if not os.access(vault_dir, os.W_OK):
+            await notifier.ops_alert(
+                f"Boot aborted: vault path not writable ({vault_dir}).", critical=True
+            )
             raise SystemExit(f"Vault path not writable: {vault_dir}")
 
     try:
@@ -120,6 +134,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await ollama.aclose()
         if arq_pool is not None:
             await arq_pool.aclose()
+        await notifier.aclose()
         log.info("delphi_shutdown")
 
 

@@ -35,6 +35,7 @@ from memory.record import (
 from memory.vault import ConversationNote, VaultWriter, WriteResult
 from telemetry.logger import RequestLogger, make_record
 from telemetry.metrics import Metrics, RequestStatus
+from telemetry.notify import Notifier
 
 
 def _last_user_content(messages: tuple[Message, ...]) -> str:
@@ -184,12 +185,18 @@ async def run_persist(
     logger: RequestLogger,
     entity_index: EntityIndex,
     metrics: Metrics,
+    notifier: Notifier | None = None,
 ) -> None:
     """Process entities, write the vault note, log the line, record metrics.
 
     The single durable side effect of an exchange. Safe to run on either the
     worker (normal path) or the gateway (Redis-down fallback) — it owns no
     process-global state beyond the components handed to it.
+
+    ``notifier`` is optional: when supplied and the vault write fails, push a
+    best-effort alert (the failure is already swallowed per the fail-open rule,
+    so this is the only way it surfaces to a human). ``None`` — the default,
+    used by tests and any caller without notifications — skips the push.
     """
     project_hint: str | None = None
     if record.resolved and record.resolved.classifier_result:
@@ -203,3 +210,7 @@ async def run_persist(
     write_result = await vault.write(_to_conversation_note(record, processed))
     await logger.log(_to_request_record(record, write_result, processed), ts=record.timestamp)
     _record_metrics(record, processed, write_result, metrics)
+    if notifier is not None and not write_result.ok:
+        await notifier.vault_write_failed(
+            write_result.path or "<unknown>", write_result.error or "unknown error"
+        )
