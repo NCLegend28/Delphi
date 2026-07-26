@@ -119,3 +119,48 @@ def test_run_seed_calls_runner_once(monkeypatch: Any, tmp_path: Path) -> None:
     assert calls[0]["parent_max_tokens"] == 4096
     assert calls[0]["child_temperature"] == 0.4
     assert calls[0]["parent_temperature"] == 0.1
+
+
+def test_run_seed_can_read_doppler_style_env_defaults(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_run_curriculum_item(**kwargs: Any) -> ChildAttemptRecord:
+        calls.append(kwargs)
+        return ChildAttemptRecord(
+            task_type=kwargs["item"].task_type,
+            candidate=kwargs["candidate"].name,
+            prompt_id=kwargs["item"].id,
+            prompt=kwargs["item"].prompt,
+            child_output="fake",
+            parent_score=1.0,
+            parent_passed=True,
+            rubric_notes="ok",
+            failure_modes=[],
+            repair=None,
+        )
+
+    monkeypatch.setattr(cli, "run_curriculum_item", fake_run_curriculum_item)
+    monkeypatch.setenv("DELPHI_NURSERY_CHILD_BASE_URL", "http://127.0.0.1:18080/v1")
+    monkeypatch.setenv("DELPHI_NURSERY_CHILD_API_KEY", "child-secret")
+    monkeypatch.setenv("DELPHI_NURSERY_PARENT_BASE_URL", "https://parent.example/v1")
+    monkeypatch.setenv("DELPHI_NURSERY_PARENT_MODEL", "parent-model")
+    monkeypatch.setenv("DELPHI_NURSERY_PARENT_API_KEY", "parent-secret")
+
+    code = cli.main(
+        [
+            "run-seed",
+            "--candidate",
+            "phi-3.5-mini-q6",
+            "--limit",
+            "1",
+            "--output",
+            str(tmp_path / "out.jsonl"),
+        ]
+    )
+
+    assert code == 0
+    assert len(calls) == 1
+    assert calls[0]["parent_model"] == "parent-model"

@@ -101,3 +101,44 @@ GET /v1/models → bartowski/Phi-3.5-mini-instruct-GGUF:Q6_K
 ```
 
 The model is a standalone child runtime. Nursery jobs can target it once network access is established from the machine running the nursery.
+
+## Doppler secret names
+
+Use Doppler to inject parent/child nursery configuration instead of exporting ad-hoc shell variables. The CLI reads these names automatically when they are present:
+
+```text
+DELPHI_NURSERY_PARENT_BASE_URL   # e.g. https://api.openai.com/v1 or another OpenAI-compatible parent
+DELPHI_NURSERY_PARENT_MODEL      # e.g. a frontier/teacher model name
+DELPHI_NURSERY_PARENT_API_KEY    # bearer token for the parent endpoint, if required
+
+DELPHI_NURSERY_CHILD_BASE_URL    # e.g. http://127.0.0.1:18080/v1 on the Delphi server
+DELPHI_NURSERY_CHILD_MODEL       # optional documentation/runtime label for the child
+DELPHI_NURSERY_CHILD_API_KEY     # only needed if llama-server is started with an API key
+HF_TOKEN                         # only needed for gated/private Hugging Face child repos
+```
+
+Example setup from a logged-in Doppler shell. Replace the placeholder values locally; do not paste real keys into chat logs:
+
+```bash
+doppler setup --project delphi --config nursery
+
+doppler secrets set \
+  DELPHI_NURSERY_PARENT_BASE_URL='https://YOUR_PARENT_OPENAI_COMPATIBLE_BASE_URL/v1' \
+  DELPHI_NURSERY_PARENT_MODEL='YOUR_PARENT_MODEL' \
+  DELPHI_NURSERY_PARENT_API_KEY='YOUR_PARENT_API_KEY' \
+  DELPHI_NURSERY_CHILD_BASE_URL='http://127.0.0.1:18080/v1' \
+  DELPHI_NURSERY_CHILD_MODEL='bartowski/Phi-3.5-mini-instruct-GGUF:Q6_K'
+```
+
+Then run without passing secrets or parent values on the command line:
+
+```bash
+doppler run -- delphi-nursery run-seed \
+  --candidate phi-3.5-mini-q6 \
+  --child-max-tokens 2048 \
+  --parent-max-tokens 2048 \
+  --limit 20 \
+  --output data/nursery/phi-3.5-mini-q6.seed.jsonl
+```
+
+For a local loopback child, `DELPHI_NURSERY_CHILD_API_KEY` should remain unset unless the child runtime is restarted with a matching `llama-server --api-key` value. Storing a child API key in Doppler by itself does not protect the already-running loopback server.

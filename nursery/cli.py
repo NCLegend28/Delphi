@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -29,11 +30,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_seed = subparsers.add_parser("run-seed", help="Run seed curriculum against a child")
     run_seed.add_argument("--candidate", required=True)
-    run_seed.add_argument("--child-base-url")
-    run_seed.add_argument("--child-api-key-env")
-    run_seed.add_argument("--parent-base-url", required=True)
-    run_seed.add_argument("--parent-api-key-env")
-    run_seed.add_argument("--parent-model", required=True)
+    run_seed.add_argument("--child-base-url", default=os.getenv("DELPHI_NURSERY_CHILD_BASE_URL"))
+    run_seed.add_argument(
+        "--child-api-key-env",
+        default=_default_api_key_env("DELPHI_NURSERY_CHILD_API_KEY"),
+    )
+    run_seed.add_argument("--parent-base-url", default=os.getenv("DELPHI_NURSERY_PARENT_BASE_URL"))
+    run_seed.add_argument(
+        "--parent-api-key-env",
+        default=_default_api_key_env("DELPHI_NURSERY_PARENT_API_KEY"),
+    )
+    run_seed.add_argument("--parent-model", default=os.getenv("DELPHI_NURSERY_PARENT_MODEL"))
     run_seed.add_argument("--child-temperature", type=float, default=DEFAULT_CHILD_TEMPERATURE)
     run_seed.add_argument("--child-max-tokens", type=int, default=DEFAULT_CHILD_MAX_TOKENS)
     run_seed.add_argument("--parent-temperature", type=float, default=DEFAULT_PARENT_TEMPERATURE)
@@ -42,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_seed.add_argument("--output", type=Path, required=True)
 
     return parser
+
+
+def _default_api_key_env(env_name: str) -> str | None:
+    """Use a Doppler-provided API key env var by default only when it exists."""
+    return env_name if os.getenv(env_name) else None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -86,8 +98,23 @@ def _run_seed(args: argparse.Namespace) -> int:
         )
         return 2
 
+    try:
+        parent_base_url = _required_arg_or_env(
+            value=args.parent_base_url,
+            cli_name="--parent-base-url",
+            env_name="DELPHI_NURSERY_PARENT_BASE_URL",
+        )
+        parent_model = _required_arg_or_env(
+            value=args.parent_model,
+            cli_name="--parent-model",
+            env_name="DELPHI_NURSERY_PARENT_MODEL",
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     parent_endpoint = RuntimeEndpoint(
-        base_url=args.parent_base_url,
+        base_url=parent_base_url,
         api_key_env=args.parent_api_key_env,
     )
     child_client = NurseryChatClient(child_endpoint)
@@ -101,7 +128,7 @@ def _run_seed(args: argparse.Namespace) -> int:
             parent_client=parent_client,
             candidate=candidate,
             output_path=args.output,
-            parent_model=args.parent_model,
+            parent_model=parent_model,
             child_temperature=args.child_temperature,
             child_max_tokens=args.child_max_tokens,
             parent_temperature=args.parent_temperature,
@@ -109,6 +136,12 @@ def _run_seed(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _required_arg_or_env(*, value: str | None, cli_name: str, env_name: str) -> str:
+    if value:
+        return value
+    raise ValueError(f"{cli_name} is required unless {env_name} is set")
 
 
 def _child_endpoint_from_args(
