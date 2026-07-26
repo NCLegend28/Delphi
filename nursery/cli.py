@@ -11,7 +11,13 @@ from pathlib import Path
 from nursery.candidates import DEFAULT_CHILD_CANDIDATES, ChildCandidate, RuntimeEndpoint
 from nursery.client import NurseryChatClient
 from nursery.curriculum import CurriculumItem, iter_seed_items
-from nursery.runner import run_curriculum_item
+from nursery.runner import (
+    DEFAULT_CHILD_MAX_TOKENS,
+    DEFAULT_CHILD_TEMPERATURE,
+    DEFAULT_PARENT_MAX_TOKENS,
+    DEFAULT_PARENT_TEMPERATURE,
+    run_curriculum_item,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_seed.add_argument("--parent-base-url", required=True)
     run_seed.add_argument("--parent-api-key-env")
     run_seed.add_argument("--parent-model", required=True)
+    run_seed.add_argument("--child-temperature", type=float, default=DEFAULT_CHILD_TEMPERATURE)
+    run_seed.add_argument("--child-max-tokens", type=int, default=DEFAULT_CHILD_MAX_TOKENS)
+    run_seed.add_argument("--parent-temperature", type=float, default=DEFAULT_PARENT_TEMPERATURE)
+    run_seed.add_argument("--parent-max-tokens", type=int, default=DEFAULT_PARENT_MAX_TOKENS)
     run_seed.add_argument("--limit", type=int, default=None)
     run_seed.add_argument("--output", type=Path, required=True)
 
@@ -92,6 +102,10 @@ def _run_seed(args: argparse.Namespace) -> int:
             candidate=candidate,
             output_path=args.output,
             parent_model=args.parent_model,
+            child_temperature=args.child_temperature,
+            child_max_tokens=args.child_max_tokens,
+            parent_temperature=args.parent_temperature,
+            parent_max_tokens=args.parent_max_tokens,
         )
     )
     return 0
@@ -121,6 +135,10 @@ async def _run_items(
     candidate: ChildCandidate,
     output_path: Path,
     parent_model: str,
+    child_temperature: float,
+    child_max_tokens: int,
+    parent_temperature: float,
+    parent_max_tokens: int,
 ) -> None:
     for item in items:
         await run_curriculum_item(
@@ -130,6 +148,10 @@ async def _run_items(
             candidate=candidate,
             output_path=output_path,
             parent_model=parent_model,
+            child_temperature=child_temperature,
+            child_max_tokens=child_max_tokens,
+            parent_temperature=parent_temperature,
+            parent_max_tokens=parent_max_tokens,
         )
 
 

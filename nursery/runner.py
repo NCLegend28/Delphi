@@ -11,6 +11,11 @@ from nursery.curriculum import CurriculumItem
 from nursery.judge import JudgeParseError, build_judge_messages, parse_parent_critique
 from nursery.records import ChildAttemptRecord
 
+DEFAULT_CHILD_TEMPERATURE = 0.2
+DEFAULT_CHILD_MAX_TOKENS = 2048
+DEFAULT_PARENT_TEMPERATURE = 0.0
+DEFAULT_PARENT_MAX_TOKENS = 2048
+
 
 class ChatCompleter(Protocol):
     """Protocol shared by real and fake OpenAI-compatible chat clients."""
@@ -33,22 +38,26 @@ async def run_curriculum_item(
     candidate: ChildCandidate,
     output_path: Path,
     parent_model: str,
+    child_temperature: float = DEFAULT_CHILD_TEMPERATURE,
+    child_max_tokens: int = DEFAULT_CHILD_MAX_TOKENS,
+    parent_temperature: float = DEFAULT_PARENT_TEMPERATURE,
+    parent_max_tokens: int = DEFAULT_PARENT_MAX_TOKENS,
 ) -> ChildAttemptRecord:
     """Run one curriculum item and append a durable JSONL attempt record."""
     started = perf_counter()
     child_output = await child.complete(
         model=candidate.name,
         messages=[{"role": "user", "content": item.prompt}],
-        temperature=0.2,
-        max_tokens=1024,
+        temperature=child_temperature,
+        max_tokens=child_max_tokens,
     )
     latency_ms = int((perf_counter() - started) * 1000)
 
     parent_output = await parent.complete(
         model=parent_model,
         messages=build_judge_messages(item=item, child_output=child_output),
-        temperature=0,
-        max_tokens=1024,
+        temperature=parent_temperature,
+        max_tokens=parent_max_tokens,
     )
 
     try:

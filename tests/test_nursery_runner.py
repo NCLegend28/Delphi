@@ -75,6 +75,37 @@ async def test_run_curriculum_item_calls_child_before_parent(tmp_path: Path) -> 
     assert record.parent_passed is True
 
 
+async def test_run_curriculum_item_uses_configured_generation_limits(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    child = FakeClient("child", "child answer", events)
+    parent = FakeClient(
+        "parent",
+        '{"score": 0.9, "passed": true, "rubric_notes": "good", '
+        '"failure_modes": [], "repair": null}',
+        events,
+    )
+
+    await run_curriculum_item(
+        item=SEED_CURRICULUM["chat"][0],
+        child=child,
+        parent=parent,
+        candidate=_candidate(),
+        output_path=tmp_path / "attempts.jsonl",
+        parent_model="delphi-auto",
+        child_max_tokens=2048,
+        parent_max_tokens=4096,
+        child_temperature=0.4,
+        parent_temperature=0.1,
+    )
+
+    assert child.calls[0]["max_tokens"] == 2048
+    assert parent.calls[0]["max_tokens"] == 4096
+    assert child.calls[0]["temperature"] == 0.4
+    assert parent.calls[0]["temperature"] == 0.1
+
+
 async def test_parent_receives_prompt_child_output_rubric_and_failure_modes(
     tmp_path: Path,
 ) -> None:

@@ -97,6 +97,14 @@ def test_run_seed_calls_runner_once(monkeypatch: Any, tmp_path: Path) -> None:
             "delphi-auto",
             "--limit",
             "1",
+            "--child-max-tokens",
+            "2048",
+            "--parent-max-tokens",
+            "4096",
+            "--child-temperature",
+            "0.4",
+            "--parent-temperature",
+            "0.1",
             "--output",
             str(output_path),
         ]
@@ -107,3 +115,7 @@ def test_run_seed_calls_runner_once(monkeypatch: Any, tmp_path: Path) -> None:
     assert calls[0]["candidate"].name == "phi-3.5-mini-q6"
     assert calls[0]["parent_model"] == "delphi-auto"
     assert calls[0]["output_path"] == output_path
+    assert calls[0]["child_max_tokens"] == 2048
+    assert calls[0]["parent_max_tokens"] == 4096
+    assert calls[0]["child_temperature"] == 0.4
+    assert calls[0]["parent_temperature"] == 0.1
