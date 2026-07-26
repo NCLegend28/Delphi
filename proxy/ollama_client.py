@@ -54,18 +54,44 @@ class OllamaClient:
         await self.aclose()
 
     async def list_models(self) -> list[str]:
-        """Return the tag names of every model Ollama has pulled locally."""
+        """Return available model names.
+
+        Ollama exposes ``/api/tags`` while standalone OpenAI-compatible
+        runtimes such as ``llama-server`` expose ``/v1/models``. Delphi's chat
+        path already uses the OpenAI-compatible completion endpoint, so the
+        boot probe accepts either model-list shape.
+        """
         try:
             response = await self._client.get("/api/tags")
         except httpx.HTTPError as exc:
             raise OllamaError(f"ollama unreachable: {exc}") from exc
 
-        if response.status_code != 200:
+        if response.status_code == 200:
+            payload = response.json()
+            models = payload.get("models", [])
+            return [m["name"] for m in models if "name" in m]
+
+        if response.status_code != 404:
             raise OllamaError(f"ollama /api/tags returned {response.status_code}")
 
+        try:
+            response = await self._client.get("/v1/models")
+        except httpx.HTTPError as exc:
+            raise OllamaError(f"openai-compatible runtime unreachable: {exc}") from exc
+
+        if response.status_code != 200:
+            raise OllamaError(f"runtime /v1/models returned {response.status_code}")
+
         payload = response.json()
-        models = payload.get("models", [])
-        return [m["name"] for m in models if "name" in m]
+        raw_models = payload.get("data", payload.get("models", []))
+        names: list[str] = []
+        for model in raw_models:
+            if not isinstance(model, dict):
+                continue
+            name = model.get("id") or model.get("name") or model.get("model")
+            if isinstance(name, str) and name:
+                names.append(name)
+        return names
 
     async def chat(
         self,

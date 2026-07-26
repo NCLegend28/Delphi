@@ -39,6 +39,26 @@ async def test_list_models_returns_tag_names(client: OllamaClient) -> None:
 
 
 @respx.mock
+async def test_list_models_falls_back_to_openai_models(client: OllamaClient) -> None:
+    respx.get(f"{BASE}/api/tags").mock(return_value=httpx.Response(404))
+    respx.get(f"{BASE}/v1/models").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "bartowski/Phi-3.5-mini-instruct-GGUF:Q6_K"},
+                ]
+            },
+        )
+    )
+
+    names = await client.list_models()
+
+    assert names == ["bartowski/Phi-3.5-mini-instruct-GGUF:Q6_K"]
+    await client.aclose()
+
+
+@respx.mock
 async def test_list_models_raises_on_non_200(client: OllamaClient) -> None:
     respx.get(f"{BASE}/api/tags").mock(return_value=httpx.Response(500))
     with pytest.raises(OllamaError):
@@ -80,7 +100,11 @@ async def test_chat_raises_on_non_200(client: OllamaClient) -> None:
 async def test_stream_chat_yields_raw_chunks(client: OllamaClient) -> None:
     body = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
     respx.post(f"{BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+        return_value=httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "text/event-stream"},
+        )
     )
     collected = b""
     async for chunk in client.stream_chat(

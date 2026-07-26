@@ -114,7 +114,7 @@ class Config(BaseSettings):
     # the famously contended bare ``PORT`` env var (Heroku, Cloud Run, and
     # several IDE "Run server" hooks all export it, which silently overrides
     # this service's ``.env`` until we namespace the field).
-    host: str = Field(default="0.0.0.0", validation_alias="DELPHI_HOST")
+    host: str = Field(default="0.0.0.0", validation_alias="DELPHI_HOST")  # noqa: S104
     port: int = Field(default=8090, validation_alias="DELPHI_PORT")
 
     # --- Speech-to-text ---
@@ -144,9 +144,10 @@ class Config(BaseSettings):
     def redacted(self) -> dict[str, object]:
         """Dump config for boot logging with the bearer token masked."""
         data = self.model_dump()
-        token = data.get("delphi_bearer_token", "")
-        if isinstance(token, str) and token:
-            data["delphi_bearer_token"] = f"{token[:4]}…<redacted>"
+        for key in ("delphi_bearer_token", "ollama_api_key", "ntfy_token"):
+            token = data.get(key, "")
+            if isinstance(token, str) and token:
+                data[key] = f"{token[:4]}…<redacted>"
         return data
 
 
