@@ -1,0 +1,137 @@
+"""Command-line interface for Delphi model nursery evaluations."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from nursery.candidates import DEFAULT_CHILD_CANDIDATES, ChildCandidate, RuntimeEndpoint
+from nursery.client import NurseryChatClient
+from nursery.curriculum import CurriculumItem, iter_seed_items
+from nursery.runner import run_curriculum_item
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the nursery CLI parser."""
+    parser = argparse.ArgumentParser(prog="python -m nursery.cli")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("list-candidates", help="List configured child candidates")
+
+    run_seed = subparsers.add_parser("run-seed", help="Run seed curriculum against a child")
+    run_seed.add_argument("--candidate", required=True)
+    run_seed.add_argument("--child-base-url")
+    run_seed.add_argument("--child-api-key-env")
+    run_seed.add_argument("--parent-base-url", required=True)
+    run_seed.add_argument("--parent-api-key-env")
+    run_seed.add_argument("--parent-model", required=True)
+    run_seed.add_argument("--limit", type=int, default=None)
+    run_seed.add_argument("--output", type=Path, required=True)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the nursery CLI and return a process-style exit code."""
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if args.command == "list-candidates":
+        _print_candidates()
+        return 0
+
+    if args.command == "run-seed":
+        return _run_seed(args)
+
+    parser.error(f"unknown command: {args.command}")
+    return 2
+
+
+def _print_candidates() -> None:
+    for candidate in DEFAULT_CHILD_CANDIDATES.values():
+        tasks = ",".join(candidate.task_types)
+        print(
+            f"{candidate.name}\t{candidate.repo}:{candidate.quant}\t"
+            f"{candidate.gguf_size_gb:.2f} GB\t{tasks}"
+        )
+
+
+def _run_seed(args: argparse.Namespace) -> int:
+    candidate = DEFAULT_CHILD_CANDIDATES.get(args.candidate)
+    if candidate is None:
+        print(f"unknown candidate: {args.candidate}", file=sys.stderr)
+        return 2
+
+    child_endpoint = _child_endpoint_from_args(candidate, args)
+    if child_endpoint is None:
+        print(
+            "--child-base-url is required because the candidate manifest has no runtime",
+            file=sys.stderr,
+        )
+        return 2
+
+    parent_endpoint = RuntimeEndpoint(
+        base_url=args.parent_base_url,
+        api_key_env=args.parent_api_key_env,
+    )
+    child_client = NurseryChatClient(child_endpoint)
+    parent_client = NurseryChatClient(parent_endpoint)
+    items = _items_for_candidate(candidate, args.limit)
+
+    asyncio.run(
+        _run_items(
+            items=items,
+            child_client=child_client,
+            parent_client=parent_client,
+            candidate=candidate,
+            output_path=args.output,
+            parent_model=args.parent_model,
+        )
+    )
+    return 0
+
+
+def _child_endpoint_from_args(
+    candidate: ChildCandidate,
+    args: argparse.Namespace,
+) -> RuntimeEndpoint | None:
+    if args.child_base_url:
+        return RuntimeEndpoint(base_url=args.child_base_url, api_key_env=args.child_api_key_env)
+    return candidate.runtime
+
+
+def _items_for_candidate(candidate: ChildCandidate, limit: int | None) -> list[CurriculumItem]:
+    items: list[CurriculumItem] = []
+    for task_type in candidate.task_types:
+        items.extend(iter_seed_items(task_type))
+    return items[:limit] if limit is not None else items
+
+
+async def _run_items(
+    *,
+    items: list[CurriculumItem],
+    child_client: NurseryChatClient,
+    parent_client: NurseryChatClient,
+    candidate: ChildCandidate,
+    output_path: Path,
+    parent_model: str,
+) -> None:
+    for item in items:
+        await run_curriculum_item(
+            item=item,
+            child=child_client,
+            parent=parent_client,
+            candidate=candidate,
+            output_path=output_path,
+            parent_model=parent_model,
+        )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
