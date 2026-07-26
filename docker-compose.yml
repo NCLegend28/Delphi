@@ -1,8 +1,8 @@
 # Delphi full stack for an 8 GB VPS. Inference runs on Ollama Cloud, so no
 # model weights or GPU live here — these four small services fit comfortably.
 #
-#   doppler setup --project delphi --config docker
-#   doppler run -- docker compose --env-file /dev/null up -d --build
+#   doppler setup --project delphi --config dock
+#   doppler run --project delphi --config dock -- docker compose --env-file /dev/null up -d --build
 #
 # Passing --env-file /dev/null keeps Compose from silently reading a local .env;
 # Doppler-injected shell variables remain available for interpolation.
@@ -16,10 +16,10 @@
 x-delphi-doppler-env: &delphi-doppler-env
   # Runtime config is injected from Doppler. Keep fixed compose-topology wiring
   # (Redis URL, container paths, internal ports) in each service below.
-  DELPHI_BEARER_TOKEN: ${DELPHI_BEARER_TOKEN:?set DELPHI_BEARER_TOKEN in Doppler config delphi/docker}
+  DELPHI_BEARER_TOKEN: ${DELPHI_BEARER_TOKEN:?set DELPHI_BEARER_TOKEN in Doppler config delphi/dock}
   DELPHI_DOMAIN: ${DELPHI_DOMAIN:-:80}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
-  OLLAMA_API_KEY: ${OLLAMA_API_KEY:?set OLLAMA_API_KEY in Doppler config delphi/docker}
+  OLLAMA_API_KEY: ${OLLAMA_API_KEY:?set OLLAMA_API_KEY in Doppler config delphi/dock}
   TIMEZONE: ${TIMEZONE:-America/Chicago}
   DELPHI_MODEL_CHAT: ${DELPHI_MODEL_CHAT:-gpt-oss:120b-cloud}
   DELPHI_MODEL_CODE: ${DELPHI_MODEL_CODE:-qwen3-coder:480b-cloud}
