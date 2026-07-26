@@ -1,14 +1,40 @@
 # Delphi full stack for an 8 GB VPS. Inference runs on Ollama Cloud, so no
 # model weights or GPU live here — these four small services fit comfortably.
 #
-#   cp .env.docker.example .env.docker   # fill in token + Ollama Cloud key
-#   docker compose up -d --build
+#   doppler setup --project delphi --config docker
+#   doppler run -- docker compose --env-file /dev/null up -d --build
+#
+# Passing --env-file /dev/null keeps Compose from silently reading a local .env;
+# Doppler-injected shell variables remain available for interpolation.
 #
 # Services:
 #   caddy         — TLS edge, serves the built UI, proxies the API (injects auth)
 #   delphi        — FastAPI gateway; enqueues persist jobs, streams from Ollama Cloud
 #   delphi-worker — drains the queue: entity extraction, vault writes, logs, metrics
 #   redis         — durable arq job queue between gateway and worker
+
+x-delphi-doppler-env: &delphi-doppler-env
+  # Runtime config is injected from Doppler. Keep fixed compose-topology wiring
+  # (Redis URL, container paths, internal ports) in each service below.
+  DELPHI_BEARER_TOKEN: ${DELPHI_BEARER_TOKEN:?set DELPHI_BEARER_TOKEN in Doppler config delphi/docker}
+  DELPHI_DOMAIN: ${DELPHI_DOMAIN:-:80}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
+  OLLAMA_API_KEY: ${OLLAMA_API_KEY:?set OLLAMA_API_KEY in Doppler config delphi/docker}
+  TIMEZONE: ${TIMEZONE:-America/Chicago}
+  DELPHI_MODEL_CHAT: ${DELPHI_MODEL_CHAT:-gpt-oss:120b-cloud}
+  DELPHI_MODEL_CODE: ${DELPHI_MODEL_CODE:-qwen3-coder:480b-cloud}
+  DELPHI_MODEL_REASON: ${DELPHI_MODEL_REASON:-deepseek-v3.1:671b-cloud}
+  DELPHI_MODEL_MULTILINGUAL: ${DELPHI_MODEL_MULTILINGUAL:-gpt-oss:120b-cloud}
+  DELPHI_MODEL_DEEP_CODE: ${DELPHI_MODEL_DEEP_CODE:-qwen3-coder:480b-cloud}
+  DELPHI_MODEL_DEEP_REASON: ${DELPHI_MODEL_DEEP_REASON:-deepseek-v3.1:671b-cloud}
+  DELPHI_MODEL_VAULT_QUERY: ${DELPHI_MODEL_VAULT_QUERY:-gpt-oss:120b-cloud}
+  DELPHI_MODEL_GRE_QUIZ: ${DELPHI_MODEL_GRE_QUIZ:-gpt-oss:120b-cloud}
+  DELPHI_MODEL_GRE_PRACTICE_TEST: ${DELPHI_MODEL_GRE_PRACTICE_TEST:-gpt-oss:120b-cloud}
+  DELPHI_MODEL_GRE_PRACTICE_SECONDARY: ${DELPHI_MODEL_GRE_PRACTICE_SECONDARY:-deepseek-v3.1:671b-cloud}
+  DELPHI_MODEL_CLASSIFIER: ${DELPHI_MODEL_CLASSIFIER:-gpt-oss:20b-cloud}
+  CLASSIFY_ENABLED: ${CLASSIFY_ENABLED:-true}
+  MEMORY_ENABLED: ${MEMORY_ENABLED:-true}
+  ENTITY_CREATE_THRESHOLD: ${ENTITY_CREATE_THRESHOLD:-2}
 
 services:
   redis:
@@ -33,8 +59,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env.docker
     environment:
+      <<: *delphi-doppler-env
       # Wiring that's fixed by the compose topology (overrides .env.docker).
       WORKER_ENABLED: "true"
       REDIS_URL: "redis://redis:6379"
@@ -68,8 +94,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env.docker
     environment:
+      <<: *delphi-doppler-env
       WORKER_ENABLED: "true"
       REDIS_URL: "redis://redis:6379"
       OBSIDIAN_VAULT_PATH: "/vault"
@@ -104,7 +130,8 @@ services:
       context: .
       dockerfile: deploy/Dockerfile.caddy
     restart: unless-stopped
-    env_file: .env.docker
+    environment:
+      <<: *delphi-doppler-env
     ports:
       # Loopback-only by default — the stack is reached over Tailscale, never
       # the public internet. Caddy injects the bearer token, so "who can reach
