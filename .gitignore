@@ -46,3 +46,6 @@ ui/dist/
 # Runtime artifacts
 *.log
 /var/log/delphi/
+
+# Delphi model nursery local outputs
+data/nursery/
