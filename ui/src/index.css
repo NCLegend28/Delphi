@@ -351,9 +351,10 @@ body::after {
 }
 .trace-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   max-width: 100%;
+  overflow: hidden;
 }
 .metric-chip,
 .ghost-button {
@@ -364,6 +365,12 @@ body::after {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+.metric-chip {
+  max-width: 36ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .metric-chip b { color: #9397ab; margin-right: 8px; font-weight: 400; }
 .ghost-button { cursor: pointer; }
