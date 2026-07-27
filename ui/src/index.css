@@ -358,7 +358,15 @@ button { cursor: pointer; }
   color: var(--color-neutral-500);
   font-size: 11px;
 }
-.brain-help { top: 24px; right: 20px; }
+.brain-help {
+  top: 58px;
+  left: 20px;
+  right: auto;
+  width: min(360px, calc(100% - 40px));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .zone-panel {
   width: 320px;
   flex: none;
