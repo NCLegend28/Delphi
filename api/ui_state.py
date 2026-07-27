@@ -222,6 +222,7 @@ def _vault_stats(vault: Path, allotted_bytes: int) -> dict[str, Any]:
     project_count = _count_md(vault / "projects")
     last_write = _last_vault_write(files)
     zones = _zone_counts(md_files)
+    beads = _vault_beads(vault, files)
     fill = min(bytes_used / allotted_bytes, 1.0) if allotted_bytes > 0 else 0.0
     return {
         "vault_path": str(vault),
@@ -233,6 +234,7 @@ def _vault_stats(vault: Path, allotted_bytes: int) -> dict[str, Any]:
         "entity_count": entity_count,
         "project_count": project_count,
         "zones": zones,
+        "beads": beads,
         "active_zone_index": _active_zone_index(zones),
         "active_zone_source": "largest vault note-count zone",
         "last_vault_write": last_write,
@@ -278,19 +280,55 @@ def _last_vault_write_from_records(records: list[dict[str, Any]]) -> dict[str, A
     return None
 
 
+def _zone_for_text(text: str) -> int:
+    lowered = text.lower()
+    for idx, (_, needles) in enumerate(_ZONE_RULES):
+        if any(needle in lowered for needle in needles):
+            return idx
+    return len(_ZONE_RULES) - 1
+
+
 def _zone_counts(md_files: list[Path]) -> list[dict[str, Any]]:
     counts = {name: 0 for name, _ in _ZONE_RULES}
     for path in md_files:
-        text = "/".join(path.parts).lower()
-        matched = False
-        for name, needles in _ZONE_RULES:
-            if any(needle in text for needle in needles):
-                counts[name] += 1
-                matched = True
-                break
-        if not matched:
-            counts["Delphi herself"] += 1
+        zone_index = _zone_for_text("/".join(path.parts))
+        counts[_ZONE_RULES[zone_index][0]] += 1
     return [{"name": name, "count": counts[name]} for name, _ in _ZONE_RULES]
+
+
+def _vault_beads(vault: Path, files: list[Path], *, limit: int = 96) -> list[dict[str, Any]]:
+    """Return real vault-backed memory beads for the hologram element.
+
+    The exported design's brain shows named beads. Those cannot be hard-coded in
+    production: each bead we return here is derived from an actual vault path.
+    """
+
+    beads: list[dict[str, Any]] = []
+    for path in sorted(files, key=lambda p: (p.suffix.lower() != ".md", str(p)))[:limit]:
+        try:
+            rel = path.relative_to(vault)
+        except ValueError:
+            rel = path
+        rel_text = rel.as_posix()
+        zone_index = _zone_for_text(rel_text)
+        parent = rel.parts[0].lower() if rel.parts else ""
+        kind = "file"
+        if path.suffix.lower() == ".md":
+            kind = "note"
+        if parent == "entities":
+            kind = "entity"
+        elif parent == "projects":
+            kind = "project"
+        beads.append(
+            {
+                "name": path.stem,
+                "kind": kind,
+                "path": rel_text,
+                "zone": _ZONE_RULES[zone_index][0],
+                "zone_index": zone_index,
+            }
+        )
+    return beads
 
 
 def _active_zone_index(zones: list[dict[str, Any]]) -> int:

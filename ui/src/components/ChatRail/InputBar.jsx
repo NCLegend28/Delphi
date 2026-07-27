@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../store/chatStore";
 import { useRecorder } from "../../hooks/useRecorder";
 import { processImage } from "../../lib/attachments";

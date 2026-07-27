@@ -41,6 +41,7 @@ export function useTypewriter(text, opts = {}) {
 
   useEffect(() => {
     if (reduceMotion) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDisplayed(text);
       return undefined;
     }

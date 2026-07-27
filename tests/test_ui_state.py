@@ -145,6 +145,10 @@ async def test_ui_state_uses_real_request_log_and_vault_metrics(ui_app: FastAPI)
     assert data["memory"]["last_vault_write"]["ok"] is False
     assert data["memory"]["active_zone_index"] == 4
     assert data["memory"]["active_zone_source"] == "largest vault note-count zone"
+    beads = data["memory"]["beads"]
+    assert {bead["name"] for bead in beads} >= {"Delphi", "Nursery", "obviate", "notes"}
+    assert all(bead["path"] for bead in beads)
+    assert all("zone_index" in bead for bead in beads)
     assert data["practice"]["vocab_card_count"] == 1
     assert data["practice"]["due_cards"] is None
 

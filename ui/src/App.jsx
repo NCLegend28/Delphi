@@ -1,15 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import "./lib/delphi-sigil.js";
+import "./lib/delphi-brain.js";
 import { OutputCanvas } from "./components/OutputCanvas";
-import { ChatRail } from "./components/ChatRail";
 import { useChatStore } from "./store/chatStore";
 import { useDelphiStore } from "./store/delphiStore";
-import { cancelDelphiStream } from "./hooks/useDelphiStream";
+import { cancelDelphiStream, useDelphiStream } from "./hooks/useDelphiStream";
 import { useUiState } from "./hooks/useUiState";
 
-const ROOMS = ["Chat", "Memory", "Practice", "System"];
+const ROOMS = [
+  { id: "chat", label: "Chat", icon: "ph-chat-teardrop-dots" },
+  { id: "memory", label: "Memory", icon: "ph-brain" },
+  { id: "practice", label: "Practice", icon: "ph-exam" },
+  { id: "system", label: "System", icon: "ph-circuitry" },
+];
 
 function App() {
-  const [room, setRoom] = useState("Chat");
+  const [room, setRoom] = useState("chat");
+  const [selectedNode, setSelectedNode] = useState(null);
   const { data, error, loading, refresh } = useUiState();
   const delphiMode = useDelphiStore((s) => s.mode);
   const ttftMs = useDelphiStore((s) => s.ttftMs);
@@ -17,327 +24,344 @@ function App() {
   useKeyboardShortcuts();
 
   return (
-    <div className="nocturne-shell">
-      <PresenceBand
-        state={presenceState(delphiMode)}
-        sentence={presenceSentence(delphiMode, data)}
-        data={data}
-        localTtftMs={ttftMs}
-        loading={loading}
-        error={error}
-        refresh={refresh}
-      />
-
-      <nav className="nocturne-tabs" aria-label="Delphi rooms">
-        {ROOMS.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className={name === room ? "is-active" : ""}
-            onClick={() => setRoom(name)}
-          >
-            {name}
-          </button>
-        ))}
-        <span className="nocturne-settings">Settings</span>
-      </nav>
-
-      <div className="nocturne-workspace">
-        <main className="nocturne-room" aria-live="polite">
-          {room === "Chat" && <ChatRoom />}
-          {room === "Memory" && <MemoryRoom data={data} />}
-          {room === "Practice" && <PracticeRoom data={data} />}
-          {room === "System" && <SystemRoom data={data} loading={loading} error={error} refresh={refresh} />}
+    <div className="home-shell">
+      <PresenceBand data={data} mode={delphiMode} ttftMs={ttftMs} loading={loading} error={error} refresh={refresh} />
+      <RoomTabs active={room} onChange={setRoom} />
+      <div className="home-workspace">
+        <main className="room-stage" aria-live="polite">
+          {room === "chat" && <ChatRoom data={data} />}
+          {room === "memory" && <MemoryRoom data={data} onNodeSelect={setSelectedNode} />}
+          {room === "practice" && <PracticeRoom data={data} />}
+          {room === "system" && <SystemRoom data={data} loading={loading} error={error} refresh={refresh} />}
         </main>
-        <ContextColumn data={data} loading={loading} error={error} />
+        <ContextColumn data={data} room={room} selectedNode={selectedNode} loading={loading} error={error} />
       </div>
     </div>
   );
 }
 
-function PresenceBand({ state, sentence, data, localTtftMs, loading, error, refresh }) {
+function PresenceBand({ data, mode, ttftMs, loading, error, refresh }) {
   const last = data?.system?.last_request;
+  const state = presenceState(mode, last);
   const route = last?.task_type ?? "no completed route";
   const model = last?.model ?? firstModel(data) ?? "no model observed";
-  const backendTtft = data?.system?.uplink?.last_ttft_ms;
-  const ttft = localTtftMs ?? backendTtft;
+  const firstToken = ttftMs ?? data?.system?.uplink?.last_ttft_ms;
+  const sentence = presenceSentence(mode, data);
 
   return (
     <header className="presence-band">
-      <div className={`sigil-mark sigil-${state}`} aria-label={`Delphi presence: ${state}`}>
-        <span />
+      <div className="presence-glow" />
+      <div className="presence-sigil-frame">
+        <delphi-sigil state={state} aria-label={`Delphi sigil ${state}`} />
       </div>
-      <div className="presence-copy">
-        <p className="eyebrow">DELPHI NOCTURNE</p>
-        <h1>{state}</h1>
-        <p>{sentence}</p>
-        <div className="trace-chips" aria-label="backend trace chips">
-          <MetricChip label="route" value={route} />
-          <MetricChip label="model" value={model} />
-          <MetricChip label="first token" value={ttft == null ? null : `${Math.round(ttft)}ms`} />
-          <MetricChip label="state source" value={last ? "request log" : "local session"} />
+      <section className="presence-copy">
+        <span className="kicker">{state}</span>
+        <h1>{sentence.title}</h1>
+        <p>{sentence.detail}</p>
+        <div className="trace-line" aria-label="technical route trace">
+          <Trace label="model" value={model} />
+          <Trace label="route" value={route} />
+          <Trace label="first token" value={firstToken == null ? null : `${Math.round(firstToken)} ms`} />
+          <Trace label="source" value={last ? "request log" : "local session"} />
         </div>
-      </div>
-      <div className="presence-side">
+      </section>
+      <section className="presence-actions">
         <Clock />
-        <button type="button" onClick={refresh} className="ghost-button">
-          {loading ? "syncing…" : "sync state"}
-        </button>
+        <button type="button" className="btn btn-secondary" onClick={refresh}>{loading ? "Syncing…" : "Sync state"}</button>
         {error ? <span className="fault-line">{error}</span> : null}
-      </div>
+      </section>
     </header>
   );
 }
 
-function ChatRoom() {
+function RoomTabs({ active, onChange }) {
   return (
-    <div className="chat-room-grid">
-      <section className="room-panel min-h-0">
-        <PanelTitle title="Conversation" detail="one surface for the active turn" />
-        <ChatRail />
-      </section>
-      <section className="room-panel min-h-0">
-        <PanelTitle title="Artifact" detail="model preview directives only" />
-        <OutputCanvas />
-      </section>
-    </div>
+    <nav className="room-tabs" aria-label="Delphi rooms">
+      {ROOMS.map((room) => (
+        <button key={room.id} type="button" className={active === room.id ? "is-active" : ""} onClick={() => onChange(room.id)}>
+          <i className={`ph ${room.icon}`} /> {room.label}
+        </button>
+      ))}
+      <button type="button" className="settings-tab"><i className="ph ph-gear-six" /> Settings</button>
+    </nav>
   );
 }
 
-function MemoryRoom({ data }) {
-  const memory = data?.memory;
-  const zones = memory?.zones ?? [];
+function ChatRoom({ data }) {
+  const messages = useChatStore((s) => s.messages);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingId = useChatStore((s) => s.streamingId);
+  const error = useChatStore((s) => s.error);
+  const { send } = useDelphiStream();
+  const [draft, setDraft] = useState("");
+  const scrollerRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, isStreaming]);
+
+  const submit = (event) => {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || isStreaming) return;
+    setDraft("");
+    send(text);
+  };
+
   return (
-    <div className="memory-room-grid">
-      <section className="room-panel graph-panel">
-        <PanelTitle title="Memory graph" detail="vault zone counts; semantic links not yet built" />
-        <div className="honest-graph" style={{ "--fill": memory?.fill ?? 0 }}>
-          <div className="graph-core" />
-          {zones.map((zone, idx) => (
-            <div
-              key={zone.name}
-              className={`graph-zone zone-${idx} ${idx === memory?.active_zone_index ? "is-active" : ""}`}
-              title={`${zone.name}: ${zone.count} notes`}
-            >
-              <span>{zone.count}</span>
+    <section className="chat-room">
+      <div ref={scrollerRef} className="conversation-surface">
+        {messages.length === 0 ? (
+          <div className="empty-conversation">
+            <span>Ask me something, or tell me what to build.</span>
+            <small>Conversation telemetry appears as real route/tool/latency chips after backend requests complete.</small>
+          </div>
+        ) : messages.map((message) => (
+          <article key={message.id} className={`turn ${message.role === "user" ? "turn-user" : "turn-delphi"}`}>
+            <div className="turn-meta">
+              <strong>{message.role === "user" ? "You" : "Delphi"}</strong>
+              {message.id === streamingId ? <span>streaming</span> : null}
+              {message.role !== "user" ? <Trace label="route" value={data?.system?.last_request?.task_type} /> : null}
             </div>
-          ))}
-        </div>
-        <div className="metric-row">
-          <MetricCard label="vault fill" value={formatPct(memory?.fill)} source="vault bytes ÷ configured allotment" />
-          <MetricCard label="notes" value={fmt(memory?.note_count)} source="*.md files in vault" />
-          <MetricCard label="entities" value={fmt(memory?.entity_count)} source="vault/entities/*.md" />
-          <MetricCard label="projects" value={fmt(memory?.project_count)} source="vault/projects/*.md" />
-        </div>
+            <p>{message.content}</p>
+          </article>
+        ))}
+        {error ? <p className="fault-line">{error}</p> : null}
+      </div>
+      <form className="composer" onSubmit={submit}>
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Ask me something, or tell me what to build."
+          rows={1}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) submit(event);
+          }}
+        />
+        <button type="button" className="icon-button" aria-label="attach image"><i className="ph ph-paperclip" /></button>
+        <button type="button" className="icon-button" aria-label="record audio"><i className="ph ph-microphone" /></button>
+        <button type="submit" className="btn btn-primary" disabled={isStreaming || !draft.trim()}>Send <i className="ph ph-arrow-up" /></button>
+      </form>
+    </section>
+  );
+}
+
+function MemoryRoom({ data, onNodeSelect }) {
+  const memory = data?.memory;
+  const fill = memory?.fill ?? 0;
+  const zone = memory?.active_zone_index ?? 0;
+  const nodes = JSON.stringify(memory?.beads ?? []);
+  const brainRef = useRef(null);
+
+  useEffect(() => {
+    const node = brainRef.current;
+    if (!node) return undefined;
+    const onSelect = (event) => onNodeSelect(event.detail);
+    node.addEventListener("node-select", onSelect);
+    return () => node.removeEventListener("node-select", onSelect);
+  }, [onNodeSelect]);
+
+  return (
+    <section className="memory-room">
+      <div className="brain-wrap">
+        <delphi-brain
+          ref={brainRef}
+          fill={String(fill)}
+          zone={String(zone)}
+          data-nodes={nodes}
+          className="brain-element"
+        />
+        <div className="brain-search"><i className="ph ph-magnifying-glass" /> real vault beads</div>
+        <div className="brain-help">drag to spin · click a node to open it</div>
+      </div>
+      <section className="zone-panel">
+        <PanelTitle title="Zones" detail={memory?.active_zone_source ?? "backend zone state unavailable"} />
+        <ZoneList zones={memory?.zones ?? []} active={zone} />
       </section>
-      <section className="room-panel">
-        <PanelTitle title="Zones" detail={memory?.active_zone_source ?? "waiting for backend state"} />
-        <ZoneBars zones={zones} />
-      </section>
-    </div>
+    </section>
   );
 }
 
 function PracticeRoom({ data }) {
   const practice = data?.practice;
+  const unavailable = [practice?.due_cards, practice?.accuracy_percent, practice?.streak_days].every((value) => value == null);
   return (
-    <section className="room-panel practice-room">
-      <PanelTitle title="Practice" detail={practice?.source ?? "backend state unavailable"} />
-      <div className="metric-row">
-        <MetricCard label="vocab cards" value={fmt(practice?.vocab_card_count)} source="vault GRE vocab files" />
-        <MetricCard label="due cards" value={fmt(practice?.due_cards)} source="not built yet" />
-        <MetricCard label="accuracy" value={formatPctMaybe(practice?.accuracy_percent)} source="not built yet" />
-        <MetricCard label="streak" value={fmt(practice?.streak_days)} source="not built yet" />
+    <section className="practice-room">
+      <div className="practice-card">
+        <span className="kicker">Practice</span>
+        <h2>{unavailable ? "Spaced repetition is not wired yet." : "Practice is ready."}</h2>
+        <p>{practice?.source ?? "Backend practice state unavailable."}</p>
+        <div className="metric-grid three">
+          <Metric label="vocab cards" value={fmt(practice?.vocab_card_count)} source="vault GRE vocab files" />
+          <Metric label="due cards" value={fmt(practice?.due_cards)} source="SRS schedule unavailable" />
+          <Metric label="streak" value={fmt(practice?.streak_days)} source="SRS history unavailable" />
+        </div>
       </div>
-      <NotBuiltList items={data?.not_built_yet ?? []} />
+      <NotBuilt items={data?.not_built_yet ?? []} />
     </section>
   );
 }
 
 function SystemRoom({ data, loading, error, refresh }) {
   return (
-    <div className="system-room-grid">
-      <section className="room-panel">
-        <PanelTitle title="My systems" detail="live backend service contract" />
-        <ServiceGrid services={data?.services ?? []} />
-      </section>
-      <section className="room-panel">
-        <PanelTitle title="Roster / routing" detail="config + today's request counts and p50 latency" />
-        <RosterTable rows={data?.roster ?? []} />
-      </section>
-      <section className="room-panel">
-        <PanelTitle title="Uplink" detail="request log hourly counts and last completion metrics" />
-        <Sparkline counts={data?.system?.uplink?.hourly_counts ?? []} />
-        <div className="metric-row compact">
-          <MetricCard label="requests today" value={fmt(data?.system?.requests_today)} source="requests.jsonl" />
-          <MetricCard label="failures today" value={fmt(data?.system?.failures_today)} source="requests.jsonl error field" />
-          <MetricCard label="last TTFT" value={ms(data?.system?.uplink?.last_ttft_ms)} source="request telemetry" />
-          <MetricCard label="last tok/s" value={tps(data?.system?.uplink?.last_tokens_per_second)} source="output tokens ÷ latency" />
-        </div>
-      </section>
-      <section className="room-panel">
-        <PanelTitle title="Request log" detail="latest durable JSONL records" />
-        <RequestLog rows={data?.requests ?? []} />
-        <button type="button" className="ghost-button" onClick={refresh}>{loading ? "syncing…" : "refresh"}</button>
-        {error ? <p className="fault-line">{error}</p> : null}
-      </section>
-      <section className="room-panel wide">
-        <PanelTitle title="Not built yet" detail="explicitly unavailable; no fabricated readouts" />
-        <NotBuiltList items={data?.not_built_yet ?? []} />
-      </section>
-    </div>
+    <section className="system-room">
+      <PanelTitle title="Services" detail="health cards backed by gateway probes/config" />
+      <ServiceGrid services={data?.services ?? []} />
+      <PanelTitle title="Roster and routing" detail="roster config + today's request counts and p50" />
+      <RosterTable rows={data?.roster ?? []} />
+      <div className="split-panels">
+        <section>
+          <PanelTitle title="Last requests" detail="durable request JSONL" />
+          <RequestLog rows={data?.requests ?? []} />
+        </section>
+        <section>
+          <PanelTitle title="Uplink" detail="last hour from request log" />
+          <Sparkline counts={data?.system?.uplink?.hourly_counts ?? []} />
+          <div className="uplink-stats">
+            <span>{ms(data?.system?.uplink?.last_ttft_ms) ?? "—"} first token</span>
+            <span>{tps(data?.system?.uplink?.last_tokens_per_second) ?? "—"}</span>
+          </div>
+        </section>
+      </div>
+      <button type="button" className="btn btn-secondary" onClick={refresh}>{loading ? "Syncing…" : "Refresh"}</button>
+      {error ? <span className="fault-line">{error}</span> : null}
+    </section>
   );
 }
 
-function ContextColumn({ data, loading, error }) {
+function ContextColumn({ data, room, selectedNode, loading, error }) {
+  const memory = data?.memory;
   const context = data?.system?.context;
-  const cue = data?.cue_cards?.[0];
-  const lastWrite = data?.memory?.last_vault_write;
+  const cue = data?.cue_cards?.[0] ?? firstUnavailableCue(data);
   return (
     <aside className="context-column">
-      <PanelTitle title="Context" detail={loading ? "syncing backend" : error ? "backend fault" : "backend metrics only"} />
-      <MetricCard label="context meter" value={contextTokens(context)} source={context?.source ?? "request log unavailable"} />
-      <div className="thin-meter" aria-label="context meter fill">
-        <span style={{ width: `${Math.min((context?.fill ?? 0) * 100, 100)}%` }} />
-      </div>
-      <MetricCard label="bitspace" value={formatPct(data?.memory?.fill)} source="vault bytes ÷ configured allotment" />
-      <div className="thin-meter memory" aria-label="vault bitspace fill">
-        <span style={{ width: `${Math.min((data?.memory?.fill ?? 0) * 100, 100)}%` }} />
-      </div>
-      <section className="cue-card">
-        <p className="eyebrow">Cue card</p>
-        {cue ? (
-          <>
-            <h3>{cue.title}</h3>
-            <p>{cue.detail}</p>
-          </>
-        ) : (
-          <p>No backend cue cards.</p>
-        )}
+      {room === "chat" ? <ArtifactPanel /> : null}
+      {room === "memory" ? <MemoryReadout memory={memory} selectedNode={selectedNode} /> : null}
+      {room === "practice" ? <PracticeReadout practice={data?.practice} /> : null}
+      {room === "system" ? <SystemReadout data={data} /> : null}
+      <section className="readout-card">
+        <PanelTitle title="Right now" detail={loading ? "syncing backend" : error ? "backend fault" : "request log state"} />
+        <Readout label="Context" value={contextTokens(context)} />
+        <Meter fill={context?.fill} />
+        <Readout label="Rate" value={`${tps(data?.system?.uplink?.last_tokens_per_second) ?? "—"} · wrote ${lastVaultWrite(memory)}`} />
+      </section>
+      <section className="readout-card">
+        <PanelTitle title="My systems" detail="live service cards" />
+        <MiniServices services={(data?.services ?? []).slice(0, 5)} />
       </section>
       <section className="cue-card">
-        <p className="eyebrow">Last vault write</p>
-        <h3>{lastWrite ? (lastWrite.ok ? "ok" : "failed") : "unavailable"}</h3>
-        <p>{lastWrite?.path ?? lastWrite?.error ?? "no vault write in today’s log"}</p>
+        <span className="kicker">Cue card</span>
+        <h3>{cue.title}</h3>
+        <p>{cue.detail}</p>
       </section>
-      <ServiceGrid services={(data?.services ?? []).slice(0, 4)} dense />
     </aside>
   );
 }
 
+function ArtifactPanel() {
+  return (
+    <section className="artifact-panel">
+      <PanelTitle title="Artifact" detail="opens beside the conversation" />
+      <OutputCanvas />
+    </section>
+  );
+}
+
+function MemoryReadout({ memory, selectedNode }) {
+  return (
+    <section className="readout-card">
+      <PanelTitle title="Bitspace" detail="vault bytes ÷ configured allotment" />
+      <div className="big-number">{formatBytes(memory?.vault_bytes)} <span>of {formatBytes(memory?.vault_allotted_bytes)} · {formatPct(memory?.fill) ?? "—"}</span></div>
+      <Meter fill={memory?.fill} memory />
+      {selectedNode ? <Readout label={selectedNode.kind} value={selectedNode.name} /> : <Readout label="Beads" value={`${memory?.beads?.length ?? 0} real vault paths`} />}
+    </section>
+  );
+}
+
+function PracticeReadout({ practice }) {
+  return (
+    <section className="readout-card">
+      <PanelTitle title="This session" detail="SRS metrics unavailable until backend scheduling lands" />
+      <Readout label="Cards in vault" value={fmt(practice?.vocab_card_count)} />
+      <Readout label="Due now" value={fmt(practice?.due_cards)} />
+      <Readout label="Accuracy" value={formatPctMaybe(practice?.accuracy_percent)} />
+    </section>
+  );
+}
+
+function SystemReadout({ data }) {
+  return (
+    <section className="readout-card">
+      <PanelTitle title="Request summary" detail="today from request log" />
+      <Readout label="Requests" value={fmt(data?.system?.requests_today)} />
+      <Readout label="Failures" value={fmt(data?.system?.failures_today)} />
+      <Readout label="Last route" value={data?.system?.last_request?.task_type} />
+    </section>
+  );
+}
+
 function PanelTitle({ title, detail }) {
-  return (
-    <div className="panel-title">
-      <h2>{title}</h2>
-      <p>{detail}</p>
-    </div>
-  );
+  return <div className="panel-title"><h2>{title}</h2><p>{detail}</p></div>;
 }
 
-function MetricChip({ label, value }) {
-  return (
-    <span className="metric-chip">
-      <b>{label}</b>{value ?? "—"}
-    </span>
-  );
+function Trace({ label, value }) {
+  return <span className="trace-chip"><b>{label}</b>{value ?? "—"}</span>;
 }
 
-function MetricCard({ label, value, source }) {
-  return (
-    <div className="metric-card">
-      <span>{label}</span>
-      <strong>{value ?? "—"}</strong>
-      <small>{source}</small>
-    </div>
-  );
+function Metric({ label, value, source }) {
+  return <div className="metric-card"><span>{label}</span><strong>{value ?? "—"}</strong><small>{source}</small></div>;
 }
 
-function ServiceGrid({ services, dense = false }) {
-  if (!services.length) return <p className="empty-state">No backend service state yet.</p>;
-  return (
-    <div className={dense ? "service-grid dense" : "service-grid"}>
-      {services.map((service) => (
-        <div key={service.id} className={`service-card status-${service.status}`}>
-          <span>{service.name}</span>
-          <strong>{service.status}</strong>
-          <small>{service.detail}</small>
-        </div>
-      ))}
-    </div>
-  );
+function ServiceGrid({ services }) {
+  if (!services.length) return <p className="empty-state">No service state reported.</p>;
+  return <div className="service-grid">{services.map((service) => <article key={service.id} className={`service-card status-${service.status}`}><span>{service.name}</span><strong>{service.status}</strong><small>{service.detail}</small></article>)}</div>;
+}
+
+function MiniServices({ services }) {
+  if (!services.length) return <p className="empty-state">No services.</p>;
+  return <div className="mini-services">{services.map((service) => <span key={service.id} className={`status-${service.status}`}><i />{service.name}</span>)}</div>;
 }
 
 function RosterTable({ rows }) {
-  if (!rows.length) return <p className="empty-state">No roster state yet.</p>;
+  if (!rows.length) return <p className="empty-state">No roster rows reported.</p>;
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr><th>Route</th><th>Model</th><th>Req</th><th>p50</th><th>Err</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.task_type}>
-              <td>{row.task_type}</td>
-              <td>{row.model}</td>
-              <td>{row.request_count}</td>
-              <td>{ms(row.p50_latency_ms)}</td>
-              <td>{row.error_count}</td>
-            </tr>
-          ))}
-        </tbody>
+    <div className="table-shell">
+      <table className="table">
+        <thead><tr><th>Route</th><th>Model</th><th>Requests</th><th>p50</th><th>Errors</th></tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.task_type}><td>{row.task_type}</td><td>{row.model}</td><td>{row.request_count}</td><td>{ms(row.p50_latency_ms) ?? "—"}</td><td>{row.error_count}</td></tr>)}</tbody>
       </table>
     </div>
   );
 }
 
 function RequestLog({ rows }) {
-  if (!rows.length) return <p className="empty-state">No requests in today’s JSONL log.</p>;
-  return (
-    <div className="request-log">
-      {rows.map((row) => (
-        <div key={row.request_id} className={row.error ? "is-error" : ""}>
-          <span>{timeOf(row.ts)}</span>
-          <b>{row.task_type}</b>
-          <small>{row.model}</small>
-          <em>{row.error ? row.error : `${row.output_tokens ?? "—"} out tok`}</em>
-        </div>
-      ))}
-    </div>
-  );
+  if (!rows.length) return <p className="empty-state">No requests in today's durable JSONL log.</p>;
+  return <div className="request-log">{rows.map((row) => <div key={row.request_id ?? `${row.ts}-${row.task_type}`}><span>{timeOf(row.ts)}</span><b>{row.task_type}</b><small>{row.model}</small><em>{row.error ? row.error : `${fmt(row.output_tokens)} out tok · ${ms(row.latency_ms) ?? "—"}`}</em></div>)}</div>;
 }
 
-function ZoneBars({ zones }) {
-  if (!zones.length) return <p className="empty-state">No vault zone counts yet.</p>;
-  const max = Math.max(...zones.map((z) => z.count), 1);
-  return (
-    <div className="zone-bars">
-      {zones.map((zone) => (
-        <div key={zone.name}>
-          <span>{zone.name}</span>
-          <div><i style={{ width: `${(zone.count / max) * 100}%` }} /></div>
-          <b>{zone.count}</b>
-        </div>
-      ))}
-    </div>
-  );
+function ZoneList({ zones, active }) {
+  if (!zones.length) return <p className="empty-state">No vault zones reported.</p>;
+  return <div className="zone-list">{zones.map((zone, idx) => <div key={zone.name} className={idx === active ? "is-active" : ""}><i /><span>{zone.name}</span><b>{zone.count}</b></div>)}</div>;
 }
 
 function Sparkline({ counts }) {
   const max = Math.max(...counts, 1);
-  return (
-    <div className="sparkline" aria-label="hourly request counts">
-      {Array.from({ length: 24 }, (_, idx) => {
-        const count = counts[idx] ?? 0;
-        return <span key={idx} title={`${idx}:00 ${count}`} style={{ height: `${8 + (count / max) * 42}px` }} />;
-      })}
-    </div>
-  );
+  return <div className="sparkline" aria-label="hourly request counts">{Array.from({ length: 24 }, (_, idx) => <span key={idx} title={`${idx}:00 ${counts[idx] ?? 0}`} style={{ height: `${8 + ((counts[idx] ?? 0) / max) * 46}px` }} />)}</div>;
 }
 
-function NotBuiltList({ items }) {
-  if (!items.length) return <p className="empty-state">Backend did not report unavailable metrics.</p>;
-  return <ul className="not-built-list">{items.map((item) => <li key={item}>{item}</li>)}</ul>;
+function NotBuilt({ items }) {
+  if (!items.length) return <p className="empty-state">No unavailable metrics reported.</p>;
+  return <section className="not-built"><PanelTitle title="Not built yet" detail="explicitly unavailable; no fabricated readouts" /><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></section>;
+}
+
+function Readout({ label, value }) {
+  return <div className="readout"><span>{label}</span><b>{value ?? "—"}</b></div>;
+}
+
+function Meter({ fill, memory = false }) {
+  const pct = fill == null ? 0 : Math.max(0, Math.min(fill, 1)) * 100;
+  return <div className={`meter ${memory ? "memory" : ""}`}><span style={{ width: `${pct}%` }} /></div>;
 }
 
 function Clock() {
@@ -351,15 +375,15 @@ function Clock() {
 
 function useKeyboardShortcuts() {
   useEffect(() => {
-    const onKey = (e) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        window.dispatchEvent(new Event("delphi:focus-input"));
-      } else if (meta && e.key.toLowerCase() === "l") {
-        e.preventDefault();
+    const onKey = (event) => {
+      const meta = event.metaKey || event.ctrlKey;
+      if (meta && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        document.querySelector(".composer textarea")?.focus();
+      } else if (meta && event.key.toLowerCase() === "l") {
+        event.preventDefault();
         clearSession();
-      } else if (e.key === "Escape" && useChatStore.getState().isStreaming) {
+      } else if (event.key === "Escape" && useChatStore.getState().isStreaming) {
         cancelDelphiStream();
       }
     };
@@ -375,23 +399,61 @@ function clearSession() {
   delphi.pushEvent("Session cleared by operator");
 }
 
-function presenceState(mode) {
-  const m = String(mode || "IDLE").toUpperCase();
-  if (m === "THINKING" || m === "SEARCHING") return "thinking";
-  if (m === "BUILDING") return "creating";
-  if (m === "DREAMING") return "dreaming";
+function presenceState(mode, last) {
+  const current = String(mode || "IDLE").toUpperCase();
+  if (["THINKING", "SEARCHING"].includes(current)) return "thinking";
+  if (current === "BUILDING") return "creating";
+  if (current === "DREAMING") return "dreaming";
+  if (last?.error) return "thinking";
   return "listening";
 }
 
 function presenceSentence(mode, data) {
+  const current = String(mode || "IDLE").toUpperCase();
   const last = data?.system?.last_request;
-  if (String(mode || "").toUpperCase() !== "IDLE") return "I am working through the active request.";
-  if (last) return `Last routed request: ${last.task_type} via ${last.model}.`;
-  return "I am listening; no completed backend request is logged for today yet.";
+  if (current !== "IDLE") return { title: "I'm working through the active request.", detail: "The live stream will write request telemetry when it completes." };
+  if (last) return { title: `Last routed as ${last.task_type}.`, detail: `${last.model} · ${ms(last.latency_ms) ?? "latency unavailable"} · ${fmt((last.input_tokens ?? 0) + (last.output_tokens ?? 0)) ?? "—"} tokens` };
+  return { title: "I'm listening.", detail: "No completed backend request is logged for today yet." };
 }
 
 function firstModel(data) {
   return data?.roster?.find((row) => row.model)?.model;
+}
+
+function firstUnavailableCue(data) {
+  const item = data?.not_built_yet?.[0];
+  return item ? { title: item, detail: "Reported unavailable by /ui/state." } : { title: "No cue cards", detail: "The backend has nothing to surface right now." };
+}
+
+function lastVaultWrite(memory) {
+  const write = memory?.last_vault_write;
+  if (!write) return "unavailable";
+  if (!write.ok) return write.error ?? "failed";
+  return timeAgo(write.modified_at);
+}
+
+function contextTokens(context) {
+  if (!context || context.last_request_tokens == null) return null;
+  return `${context.last_request_tokens.toLocaleString()} / ${context.window_tokens.toLocaleString()} · ${formatPct(context.fill)}`;
+}
+
+function timeAgo(value) {
+  if (!value) return "unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unavailable";
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 90) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function timeOf(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmt(value) {
@@ -401,7 +463,7 @@ function fmt(value) {
 }
 
 function ms(value) {
-  return value === null || value === undefined ? null : `${Math.round(value)}ms`;
+  return value === null || value === undefined ? null : `${Math.round(value)} ms`;
 }
 
 function tps(value) {
@@ -416,16 +478,16 @@ function formatPctMaybe(value) {
   return value === null || value === undefined ? null : `${Math.round(value)}%`;
 }
 
-function contextTokens(context) {
-  if (!context || context.last_request_tokens == null) return null;
-  return `${context.last_request_tokens.toLocaleString()} / ${context.window_tokens.toLocaleString()} tok`;
-}
-
-function timeOf(ts) {
-  if (!ts) return "—";
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatBytes(value) {
+  if (value === null || value === undefined) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = Number(value);
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
 }
 
 export default App;

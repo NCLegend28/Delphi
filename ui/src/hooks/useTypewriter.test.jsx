@@ -37,7 +37,7 @@ beforeEach(() => {
 
 describe("useTypewriter", () => {
   it("starts empty and reveals the source over successive frames", () => {
-    const { result, rerender } = renderHook(({ t }) => useTypewriter(t, { charsPerSecond: 100 }), {
+    const { result } = renderHook(({ t }) => useTypewriter(t, { charsPerSecond: 100 }), {
       initialProps: { t: "hello world" },
     });
     expect(result.current).toBe("");

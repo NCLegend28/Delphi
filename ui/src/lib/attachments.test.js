@@ -37,7 +37,6 @@ function fakeFile({ type = "image/png", size = 1024, name = "x.png" } = {}) {
 
 beforeEach(() => {
   // Wipe OffscreenCanvas so we deterministically hit the DOM canvas branch.
-  // eslint-disable-next-line no-undef
   delete globalThis.OffscreenCanvas;
   installFakeCanvas();
 });

@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => {
         '/v1': target,
         '/healthz': target,
         '/readyz': target,
+        '/ui': target,
       },
     },
   }

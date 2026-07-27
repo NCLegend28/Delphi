@@ -58,7 +58,6 @@ export function PracticeTestPreview({ testId, fallbackBody }) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
 
   const questionIds = useMemo(() => Object.keys(answers).sort(byNaturalOrder), [answers]);
