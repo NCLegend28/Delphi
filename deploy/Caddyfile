@@ -16,7 +16,7 @@
 
 	# API surface → gateway. Inject the real bearer regardless of what the
 	# client sent, so the UI never needs to hold the token.
-	@api path /v1/* /healthz /readyz /metrics
+	@api path /v1/* /healthz /readyz /metrics /ui/state
 	handle @api {
 		reverse_proxy delphi:8080 {
 			header_up Authorization "Bearer {$DELPHI_BEARER_TOKEN}"

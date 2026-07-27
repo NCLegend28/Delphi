@@ -75,4 +75,18 @@ TASK_BENCHMARKS: dict[str, list[BenchmarkRef]] = {
         BenchmarkRef("livebench", "instruction_following", 0.5),
         BenchmarkRef("livebench", "reasoning", 0.5),
     ],
+    "gre_quiz": [
+        # Tutor loop: instruction following for format/tool obedience, language
+        # for vocab explanations, reasoning for grading user definitions.
+        BenchmarkRef("livebench", "instruction_following", 0.4),
+        BenchmarkRef("livebench", "language", 0.3),
+        BenchmarkRef("livebench", "reasoning", 0.3),
+    ],
+    "gre_practice_test": [
+        # Practice-test generation is mostly format obedience plus reasoning;
+        # language quality matters for readable stems and explanations.
+        BenchmarkRef("livebench", "instruction_following", 0.4),
+        BenchmarkRef("livebench", "reasoning", 0.4),
+        BenchmarkRef("livebench", "language", 0.2),
+    ],
 }

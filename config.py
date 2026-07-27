@@ -34,6 +34,11 @@ class Config(BaseSettings):
     obsidian_vault_path: str = ""
     log_dir: str = "/var/log/delphi"
     timezone: str = "America/Chicago"
+    # Interface-only capacity label for the vault/brain bitspace meter.
+    # The meter's numerator is computed from real vault bytes; this value is
+    # the explicit configured allotment, not a fabricated measurement.
+    delphi_vault_bitspace_bytes: int = 16 * 1024 * 1024 * 1024
+    delphi_context_window_tokens: int = 32768
 
     # --- Optional ---
     classify_enabled: bool = True
@@ -128,6 +133,11 @@ class Config(BaseSettings):
     speech_to_text_max_upload_bytes: int = 25 * 1024 * 1024
     speech_to_text_max_duration_seconds: int | None = None
 
+
+    @field_validator("timezone")
+    @classmethod
+    def _default_timezone(cls, v: str) -> str:
+        return v or "America/Chicago"
 
     @field_validator("obsidian_vault_path", "log_dir")
     @classmethod

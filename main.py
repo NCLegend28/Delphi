@@ -29,8 +29,9 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 
 from api.audio import router as audio_router
 from api.chat import router as chat_router
-from api.practice_tests import router as practice_tests_router
 from api.deps import get_metrics, get_ollama, get_roster
+from api.practice_tests import router as practice_tests_router
+from api.ui_state import router as ui_state_router
 from auth.bearer import require_bearer
 from config import get_config
 from memory.entities import EntityIndex
@@ -114,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         vault_dir = Path(cfg.obsidian_vault_path)
         try:
-            vault_dir.mkdir(parents=True, exist_ok=True)
+            vault_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
         except OSError as exc:
             log.error("vault_path_unwritable", path=str(vault_dir), error=str(exc))
             await notifier.ops_alert(
@@ -142,6 +143,7 @@ app = FastAPI(title="Delphi", version="0.1.0", lifespan=lifespan)
 app.include_router(chat_router)
 app.include_router(audio_router)
 app.include_router(practice_tests_router)
+app.include_router(ui_state_router)
 
 
 # --- public liveness ------------------------------------------------------
