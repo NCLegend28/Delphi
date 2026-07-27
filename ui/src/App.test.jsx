@@ -17,7 +17,7 @@ const UI_STATE = {
     last_request: {
       request_id: "r3",
       task_type: "code",
-      model: "phi-local",
+      model: "bartowski/Phi-3.5-mini-instruct-GGUF:Q6_K",
       latency_ms: 5000,
       input_tokens: 40,
       output_tokens: 80,
@@ -118,7 +118,8 @@ describe("Delphi AI Home UI", () => {
     expect(container.querySelector(".presence-band")).toBeInTheDocument();
     expect(container.querySelector("delphi-sigil")).toHaveAttribute("state", "listening");
     expect(screen.getByText("Last routed as code.")).toBeInTheDocument();
-    expect(screen.getByText("phi-local")).toBeInTheDocument();
+    expect(screen.getByText(/Phi-3\.5-mini · Q6_K · 5000 ms · 120 tokens/)).toBeInTheDocument();
+    expect(screen.queryByText(/bartowski\/Phi-3\.5-mini-instruct-GGUF:Q6_K · 5000 ms/)).not.toBeInTheDocument();
     expect(screen.getByText("1000 ms")).toBeInTheDocument();
     expect(screen.getByText("120 / 1,000 · 12%")).toBeInTheDocument();
     expect(screen.getByText("Request failures today")).toBeInTheDocument();

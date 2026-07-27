@@ -149,7 +149,16 @@ button { cursor: pointer; }
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
-.presence-copy p { margin: 0; color: var(--color-neutral-500); font-size: 13px; }
+.presence-copy p {
+  margin: 0;
+  max-width: min(54ch, 100%);
+  color: var(--color-neutral-500);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.presence-blurb { display: block; }
 .trace-line { display: flex; flex-wrap: wrap; gap: 7px; max-width: 100%; }
 .trace-chip {
   display: inline-flex;

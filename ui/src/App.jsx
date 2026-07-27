@@ -47,6 +47,7 @@ function PresenceBand({ data, mode, ttftMs, loading, error, refresh }) {
   const model = last?.model ?? firstModel(data) ?? "no model observed";
   const firstToken = ttftMs ?? data?.system?.uplink?.last_ttft_ms;
   const sentence = presenceSentence(mode, data);
+  const detail = abbreviatePresenceBlurb(sentence.detail);
 
   return (
     <header className="presence-band">
@@ -57,7 +58,7 @@ function PresenceBand({ data, mode, ttftMs, loading, error, refresh }) {
       <section className="presence-copy">
         <span className="kicker">{state}</span>
         <h1>{sentence.title}</h1>
-        <p>{sentence.detail}</p>
+        <p className="presence-blurb" title={sentence.detail}>{detail}</p>
         <div className="trace-line" aria-label="technical route trace">
           <Trace label="model" value={model} />
           <Trace label="route" value={route} />
@@ -411,9 +412,32 @@ function presenceState(mode, last) {
 function presenceSentence(mode, data) {
   const current = String(mode || "IDLE").toUpperCase();
   const last = data?.system?.last_request;
-  if (current !== "IDLE") return { title: "I'm working through the active request.", detail: "The live stream will write request telemetry when it completes." };
-  if (last) return { title: `Last routed as ${last.task_type}.`, detail: `${last.model} · ${ms(last.latency_ms) ?? "latency unavailable"} · ${fmt((last.input_tokens ?? 0) + (last.output_tokens ?? 0)) ?? "—"} tokens` };
-  return { title: "I'm listening.", detail: "No completed backend request is logged for today yet." };
+  if (current !== "IDLE") return { title: "I'm working through the active request.", detail: "Telemetry writes on completion." };
+  if (last) {
+    const tokens = fmt((last.input_tokens ?? 0) + (last.output_tokens ?? 0)) ?? "—";
+    return { title: `Last routed as ${last.task_type}.`, detail: `${compactModelName(last.model)} · ${ms(last.latency_ms) ?? "latency unavailable"} · ${tokens} tokens` };
+  }
+  return { title: "I'm listening.", detail: "No request logged today." };
+}
+
+function compactModelName(model) {
+  if (!model) return "model unavailable";
+  const cleaned = String(model)
+    .replace(/^.*\//, "")
+    .replace(/-instruct/i, "")
+    .replace(/-GGUF/i, "")
+    .replace(/bartowski\//i, "")
+    .replace(/mini/i, "mini")
+    .replace(/:{1,2}/g, " · ");
+  return abbreviatePresenceBlurb(cleaned, 26);
+}
+
+function abbreviatePresenceBlurb(value, maxLength = 54) {
+  const text = String(value ?? "");
+  if (text.length <= maxLength) return text;
+  const head = Math.max(12, Math.ceil((maxLength - 1) * 0.62));
+  const tail = Math.max(6, maxLength - head - 1);
+  return `${text.slice(0, head).trimEnd()}…${text.slice(-tail).trimStart()}`;
 }
 
 function firstModel(data) {
