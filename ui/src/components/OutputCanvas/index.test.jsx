@@ -16,6 +16,16 @@ beforeEach(() => {
   useDelphiStore.getState().reset();
 });
 
+describe("OutputCanvas dashboard shell", () => {
+  it("uses the uploaded dark dashboard style shell for the idle output surface", () => {
+    const { container } = render(<OutputCanvas />);
+    expect(container.querySelector(".output-canvas-card")).toBeInTheDocument();
+    expect(container.querySelector(".output-metric-row")).toBeInTheDocument();
+    expect(container.querySelector(".output-chart-card")).toBeInTheDocument();
+    expect(screen.getByText("Response")).toHaveClass("is-active");
+    expect(screen.getByText("Render surface")).toBeInTheDocument();
+  });
+});
 describe("OutputCanvas preview toolbar", () => {
   it("renders DOWNLOAD and COPY buttons for a document preview", () => {
     useDelphiStore.getState().setPreview({

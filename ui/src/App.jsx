@@ -306,8 +306,7 @@ function ContextColumn({ data, room, selectedNode, loading, error }) {
 
 function ArtifactPanel() {
   return (
-    <section className="artifact-panel">
-      <PanelTitle title="Artifact" detail="opens beside the conversation" />
+    <section className="artifact-panel" aria-label="Artifact output canvas">
       <OutputCanvas />
     </section>
   );

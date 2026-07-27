@@ -55,19 +55,23 @@ export function OutputCanvas() {
   }, [currentAssistant?.content, lastUser?.id, preview, awaitingReply]);
 
   return (
-    <div className="panel relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="panel-header">
-        <span
-          className="h-[5px] w-[5px] rounded-full bg-[var(--color-accent-cyan)]"
-          style={{ boxShadow: "0 0 6px var(--color-accent-cyan)" }}
-        />
-        <span className="text-[9px] tracking-[0.2em] text-[var(--color-text-dim)]">OUTPUT CANVAS</span>
-        <span className="ml-auto text-[9px] tracking-[0.1em] text-[var(--color-text-dim)]">{status}</span>
+    <div className="output-canvas-card">
+      <div className="output-canvas-topbar">
+        <div>
+          <span className="output-canvas-eyebrow">Artifact</span>
+          <strong>Output Canvas</strong>
+        </div>
+        <span className="output-status-pill">{status}</span>
+      </div>
+      <div className="output-canvas-tabs" aria-label="output canvas modes">
+        <span className={preview ? "" : "is-active"}>Response</span>
+        <span className={preview ? "is-active" : ""}>Preview</span>
+        <span>Trace</span>
       </div>
 
-      <div className="bg-grid relative min-h-0 flex-1 overflow-hidden">
+      <div className="output-canvas-body">
         {hasExchange || preview ? (
-          <div ref={scrollRef} className="relative z-10 mx-auto flex h-full max-w-[760px] flex-col gap-2 overflow-y-auto p-5">
+          <div ref={scrollRef} className="output-canvas-scroll">
             {lastUser && <QueryBlock text={lastUser.content} />}
             {(currentAssistant || awaitingReply) && (
               // ``key`` ensures the typewriter resets cleanly per turn —
@@ -83,9 +87,7 @@ export function OutputCanvas() {
             {preview && <PreviewBlock preview={preview} />}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center">
-            <Awaiting />
-          </div>
+          <Awaiting />
         )}
       </div>
     </div>
@@ -94,11 +96,9 @@ export function OutputCanvas() {
 
 function QueryBlock({ text }) {
   return (
-    <div className="rounded-[0_4px_4px_0] border border-[var(--color-border-dim)] border-l-2 border-l-[var(--color-accent-violet)] bg-[var(--color-bg-surface)]/70 px-4 py-3">
-      <span className="mb-1.5 block text-[8px] tracking-[0.2em] text-[var(--color-accent-violet)]">QUERY ──</span>
-      <span className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--color-text-primary)]">
-        {text}
-      </span>
+    <div className="output-query-block">
+      <span>QUERY</span>
+      <p>{text}</p>
     </div>
   );
 }
@@ -111,12 +111,12 @@ function OutputBlock({ text, streaming }) {
   const displayed = useTypewriter(text);
   const stillRevealing = displayed.length < text.length;
   return (
-    <div className="rounded-[0_4px_4px_0] border border-[var(--color-border-dim)] border-l-2 border-l-[var(--color-accent-cyan)] bg-[var(--color-bg-surface)]/80 px-4 py-3">
-      <span className="mb-1.5 block text-[8px] tracking-[0.2em] text-[var(--color-accent-cyan)]">DELPHI OUTPUT ──</span>
-      <span className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--color-text-primary)]">
+    <div className="output-response-block">
+      <span>DELPHI OUTPUT</span>
+      <p>
         {displayed}
         {(streaming || stillRevealing) && <Caret />}
-      </span>
+      </p>
     </div>
   );
 }
@@ -132,19 +132,29 @@ function Caret() {
 
 function Awaiting() {
   return (
-    <div className="relative z-10 flex flex-col items-center gap-3 opacity-50">
-      <div className="relative flex h-12 w-12 items-center justify-center rounded-full border border-[var(--color-border-strong)]">
-        <span className="absolute -inset-1.5 rounded-full border border-[var(--color-border-dim)] animate-spin-slow" />
-        <span className="absolute -inset-3 rounded-full border border-dashed border-[var(--color-border-dim)] animate-spin-slower" />
-        <span
-          className="h-2 w-2 rounded-full bg-[var(--color-accent-cyan)]"
-          style={{ boxShadow: "0 0 12px var(--color-accent-cyan)" }}
-        />
+    <div className="output-awaiting-state">
+      <div className="output-metric-row" aria-hidden="true">
+        <div><span>State</span><strong>Idle</strong></div>
+        <div><span>Render</span><strong>Ready</strong></div>
+        <div><span>Preview</span><strong>0</strong></div>
       </div>
-      <span className="text-[10px] tracking-[0.25em] text-[var(--color-text-faint)]">AWAITING</span>
-      <span className="text-[9px] tracking-[0.1em] text-[var(--color-text-faint)]">
-        Delphi will render output here as it works.
-      </span>
+      <div className="output-chart-card" aria-hidden="true">
+        <div className="output-chart-header">
+          <span>Render surface</span>
+          <b>awaiting output</b>
+        </div>
+        <svg viewBox="0 0 420 140" role="presentation">
+          <defs>
+            <linearGradient id="output-canvas-fill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#33d69f" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="#33d69f" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path className="output-chart-fill" d="M0 106 C54 98 76 92 120 96 C170 101 191 78 232 82 C278 86 307 52 347 58 C380 63 397 47 420 50 L420 140 L0 140 Z" />
+          <path className="output-chart-line" d="M0 106 C54 98 76 92 120 96 C170 101 191 78 232 82 C278 86 307 52 347 58 C380 63 397 47 420 50" />
+        </svg>
+      </div>
+      <p>Delphi will render output here as it works.</p>
     </div>
   );
 }
