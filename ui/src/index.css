@@ -131,7 +131,8 @@ button { cursor: pointer; }
   position: relative;
   z-index: 1;
   min-width: 0;
-  max-width: 760px;
+  max-width: min(760px, calc(100vw - 560px));
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -159,21 +160,31 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
 }
 .presence-blurb { display: block; }
-.trace-line { display: flex; flex-wrap: wrap; gap: 7px; max-width: 100%; }
+.trace-line {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
 .trace-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 220px;
+  max-width: 172px;
+  flex: 0 1 auto;
   padding: 2px 7px;
   border-radius: 5px;
   border: 1px solid rgba(233, 233, 237, 0.14);
   color: var(--color-neutral-400);
   font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
 }
-.trace-chip b { color: var(--color-neutral-600); font-weight: 500; }
+.trace-chip b { color: var(--color-neutral-600); font-weight: 500; flex: none; }
+.trace-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .presence-actions {
   position: relative;
   z-index: 1;
@@ -318,11 +329,12 @@ button { cursor: pointer; }
   z-index: 2;
   color: var(--color-neutral-600);
   font-size: 12px;
-  pointer-events: none;
 }
+.brain-help { pointer-events: none; }
 .brain-search {
   top: 16px;
   left: 20px;
+  width: min(300px, calc(100% - 40px));
   display: flex;
   align-items: center;
   gap: 9px;
@@ -331,6 +343,20 @@ button { cursor: pointer; }
   border-radius: 8px;
   border: 1px solid rgba(233, 233, 237, 0.16);
   background: rgba(18, 19, 31, 0.86);
+}
+.brain-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+}
+.brain-search input::placeholder { color: var(--color-neutral-500); }
+.brain-search span {
+  flex: none;
+  color: var(--color-neutral-500);
+  font-size: 11px;
 }
 .brain-help { top: 24px; right: 20px; }
 .zone-panel {
@@ -341,17 +367,22 @@ button { cursor: pointer; }
   overflow: auto;
 }
 .zone-list { display: flex; flex-direction: column; gap: 6px; }
-.zone-list > div {
+.zone-list > button {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   padding: 6px 11px;
+  border: 1px solid transparent;
   border-radius: 8px;
+  background: transparent;
   color: var(--color-neutral-400);
+  text-align: left;
 }
-.zone-list > div.is-active {
+.zone-list > button:hover,
+.zone-list > button.is-active {
   background: rgba(145, 132, 217, 0.10);
-  border: 1px solid rgba(145, 132, 217, 0.26);
+  border-color: rgba(145, 132, 217, 0.26);
   color: var(--color-text);
 }
 .zone-list i, .mini-services i {

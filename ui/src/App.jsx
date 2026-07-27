@@ -151,17 +151,50 @@ function ChatRoom({ data }) {
 function MemoryRoom({ data, onNodeSelect }) {
   const memory = data?.memory;
   const fill = memory?.fill ?? 0;
-  const zone = memory?.active_zone_index ?? 0;
-  const nodes = JSON.stringify(memory?.beads ?? []);
+  const backendZone = memory?.active_zone_index ?? 0;
+  const beads = memory?.beads ?? [];
+  const nodes = JSON.stringify(beads);
+  const [query, setQuery] = useState("");
+  const [zoneOverride, setZoneOverride] = useState(null);
+  const [highlightZone, setHighlightZone] = useState(-1);
+  const activeZone = zoneOverride ?? backendZone;
   const brainRef = useRef(null);
+  const searchMatches = query.trim()
+    ? beads.filter((bead) => String(bead.name ?? bead.path ?? "").toLowerCase().includes(query.trim().toLowerCase()))
+    : [];
 
   useEffect(() => {
     const node = brainRef.current;
     if (!node) return undefined;
-    const onSelect = (event) => onNodeSelect(event.detail);
+    const onSelect = (event) => {
+      onNodeSelect(event.detail);
+      if (Number.isInteger(event.detail?.zoneIndex)) {
+        setZoneOverride(event.detail.zoneIndex);
+        setHighlightZone(event.detail.zoneIndex);
+      }
+    };
+    const onClear = () => onNodeSelect(null);
     node.addEventListener("node-select", onSelect);
-    return () => node.removeEventListener("node-select", onSelect);
+    node.addEventListener("node-clear", onClear);
+    return () => {
+      node.removeEventListener("node-select", onSelect);
+      node.removeEventListener("node-clear", onClear);
+    };
   }, [onNodeSelect]);
+
+  const submitSearch = (event) => {
+    event.preventDefault();
+    const match = brainRef.current?.find?.(query)?.[0];
+    if (!match) return;
+    brainRef.current.focusNode(match.name);
+    setZoneOverride(match.zone);
+    setHighlightZone(match.zone);
+  };
+
+  const selectZone = (idx) => {
+    setZoneOverride(idx);
+    setHighlightZone(idx);
+  };
 
   return (
     <section className="memory-room">
@@ -169,16 +202,27 @@ function MemoryRoom({ data, onNodeSelect }) {
         <delphi-brain
           ref={brainRef}
           fill={String(fill)}
-          zone={String(zone)}
+          zone={String(activeZone)}
+          highlight={String(highlightZone)}
+          query={query}
           data-nodes={nodes}
           className="brain-element"
         />
-        <div className="brain-search"><i className="ph ph-magnifying-glass" /> real vault beads</div>
-        <div className="brain-help">drag to spin · click a node to open it</div>
+        <form className="brain-search" onSubmit={submitSearch}>
+          <i className="ph ph-magnifying-glass" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search real vault beads"
+            aria-label="Search real vault beads"
+          />
+          {query ? <span>{searchMatches.length} match{searchMatches.length === 1 ? "" : "es"}</span> : null}
+        </form>
+        <div className="brain-help">drag to spin · click a node · enter opens first match</div>
       </div>
       <section className="zone-panel">
         <PanelTitle title="Zones" detail={memory?.active_zone_source ?? "backend zone state unavailable"} />
-        <ZoneList zones={memory?.zones ?? []} active={zone} />
+        <ZoneList zones={memory?.zones ?? []} active={activeZone} onSelect={selectZone} />
       </section>
     </section>
   );
@@ -307,7 +351,9 @@ function PanelTitle({ title, detail }) {
 }
 
 function Trace({ label, value }) {
-  return <span className="trace-chip"><b>{label}</b>{value ?? "—"}</span>;
+  const raw = value ?? "—";
+  const display = label === "model" ? compactModelName(raw) : abbreviatePresenceBlurb(raw, 30);
+  return <span className="trace-chip" title={`${label}: ${raw}`}><b>{label}</b><span>{display}</span></span>;
 }
 
 function Metric({ label, value, source }) {
@@ -341,9 +387,25 @@ function RequestLog({ rows }) {
   return <div className="request-log">{rows.map((row) => <div key={row.request_id ?? `${row.ts}-${row.task_type}`}><span>{timeOf(row.ts)}</span><b>{row.task_type}</b><small>{row.model}</small><em>{row.error ? row.error : `${fmt(row.output_tokens)} out tok · ${ms(row.latency_ms) ?? "—"}`}</em></div>)}</div>;
 }
 
-function ZoneList({ zones, active }) {
+function ZoneList({ zones, active, onSelect }) {
   if (!zones.length) return <p className="empty-state">No vault zones reported.</p>;
-  return <div className="zone-list">{zones.map((zone, idx) => <div key={zone.name} className={idx === active ? "is-active" : ""}><i /><span>{zone.name}</span><b>{zone.count}</b></div>)}</div>;
+  return (
+    <div className="zone-list">
+      {zones.map((zone, idx) => (
+        <button
+          key={zone.name}
+          type="button"
+          className={idx === active ? "is-active" : ""}
+          onClick={() => onSelect?.(idx)}
+          onMouseEnter={() => onSelect?.(idx)}
+        >
+          <i />
+          <span>{zone.name}</span>
+          <b>{zone.count}</b>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function Sparkline({ counts }) {

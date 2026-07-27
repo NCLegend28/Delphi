@@ -132,6 +132,15 @@ describe("Delphi AI Home UI", () => {
     expect(brain.getAttribute("data-nodes")).toContain("entities/Delphi.md");
     expect(screen.getByText("3 real vault paths")).toBeInTheDocument();
 
+    const search = screen.getByRole("textbox", { name: /Search real vault beads/ });
+    fireEvent.change(search, { target: { value: "delphi" } });
+    expect(brain).toHaveAttribute("query", "delphi");
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Trading/ }));
+    expect(brain).toHaveAttribute("zone", "1");
+    expect(brain).toHaveAttribute("highlight", "1");
+
     fireEvent.click(screen.getByRole("button", { name: /Practice/ }));
     expect(screen.getByText("Spaced repetition is not wired yet.")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
