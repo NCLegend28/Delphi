@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./lib/delphi-sigil.js";
 import "./lib/delphi-brain.js";
-import { OutputCanvas } from "./components/OutputCanvas";
 import { useChatStore } from "./store/chatStore";
 import { useDelphiStore } from "./store/delphiStore";
 import { cancelDelphiStream, useDelphiStream } from "./hooks/useDelphiStream";
@@ -17,24 +16,48 @@ const ROOMS = [
 function App() {
   const [room, setRoom] = useState("chat");
   const [selectedNode, setSelectedNode] = useState(null);
+  const [memoryView, setMemoryView] = useState("graph");
+  const [memoryZoneOverride, setMemoryZoneOverride] = useState(null);
+  const [memoryHighlightZone, setMemoryHighlightZone] = useState(-1);
   const { data, error, loading, refresh } = useUiState();
   const delphiMode = useDelphiStore((s) => s.mode);
   const ttftMs = useDelphiStore((s) => s.ttftMs);
+  const activeMemoryZone = memoryZoneOverride ?? data?.memory?.active_zone_index ?? 0;
+  const selectMemoryZone = (idx) => {
+    setMemoryZoneOverride(idx);
+    setMemoryHighlightZone(idx);
+  };
 
   useKeyboardShortcuts();
 
   return (
     <div className="home-shell">
-      <PresenceBand data={data} mode={delphiMode} ttftMs={ttftMs} loading={loading} error={error} refresh={refresh} />
-      <RoomTabs active={room} onChange={setRoom} />
+      <PresenceBand data={data} mode={delphiMode} ttftMs={ttftMs} loading={loading} error={error} refresh={refresh} room={room} />
+      <RoomTabs active={room} onChange={setRoom} memoryView={memoryView} onMemoryViewChange={setMemoryView} />
       <div className="home-workspace">
         <main className="room-stage" aria-live="polite">
           {room === "chat" && <ChatRoom data={data} />}
-          {room === "memory" && <MemoryRoom data={data} onNodeSelect={setSelectedNode} />}
+          {room === "memory" && (
+            <MemoryRoom
+              data={data}
+              onNodeSelect={setSelectedNode}
+              activeZone={activeMemoryZone}
+              highlightZone={memoryHighlightZone}
+              onZoneSelect={selectMemoryZone}
+            />
+          )}
           {room === "practice" && <PracticeRoom data={data} />}
           {room === "system" && <SystemRoom data={data} loading={loading} error={error} refresh={refresh} />}
         </main>
-        <ContextColumn data={data} room={room} selectedNode={selectedNode} loading={loading} error={error} />
+        <ContextColumn
+          data={data}
+          room={room}
+          selectedNode={selectedNode}
+          loading={loading}
+          error={error}
+          activeMemoryZone={activeMemoryZone}
+          onMemoryZoneSelect={selectMemoryZone}
+        />
       </div>
     </div>
   );
@@ -75,15 +98,22 @@ function PresenceBand({ data, mode, ttftMs, loading, error, refresh }) {
   );
 }
 
-function RoomTabs({ active, onChange }) {
+function RoomTabs({ active, onChange, memoryView, onMemoryViewChange }) {
   return (
     <nav className="room-tabs" aria-label="Delphi rooms">
       {ROOMS.map((room) => (
         <button key={room.id} type="button" className={active === room.id ? "is-active" : ""} onClick={() => onChange(room.id)}>
-          <i className={`ph ${room.icon}`} /> {room.label}
+          <i className={`ph ${active === room.id ? room.icon.replace("ph-", "ph-fill ph-") : room.icon}`} /> {room.label}
         </button>
       ))}
-      <button type="button" className="settings-tab"><i className="ph ph-gear-six" /> Settings</button>
+      {active === "memory" ? (
+        <div className="memory-view-toggle" aria-label="Memory view">
+          <button type="button" className={memoryView === "timeline" ? "is-active" : ""} onClick={() => onMemoryViewChange("timeline")}>Timeline</button>
+          <button type="button" className={memoryView === "graph" ? "is-active" : ""} onClick={() => onMemoryViewChange("graph")}>Graph</button>
+        </div>
+      ) : (
+        <button type="button" className="settings-tab"><i className="ph ph-gear-six" /> Settings</button>
+      )}
     </nav>
   );
 }
@@ -148,20 +178,13 @@ function ChatRoom({ data }) {
   );
 }
 
-function MemoryRoom({ data, onNodeSelect }) {
+function MemoryRoom({ data, onNodeSelect, activeZone, highlightZone, onZoneSelect }) {
   const memory = data?.memory;
   const fill = memory?.fill ?? 0;
-  const backendZone = memory?.active_zone_index ?? 0;
   const beads = memory?.beads ?? [];
   const nodes = JSON.stringify(beads);
   const [query, setQuery] = useState("");
-  const [zoneOverride, setZoneOverride] = useState(null);
-  const [highlightZone, setHighlightZone] = useState(-1);
-  const activeZone = zoneOverride ?? backendZone;
   const brainRef = useRef(null);
-  const searchMatches = query.trim()
-    ? beads.filter((bead) => String(bead.name ?? bead.path ?? "").toLowerCase().includes(query.trim().toLowerCase()))
-    : [];
 
   useEffect(() => {
     const node = brainRef.current;
@@ -169,8 +192,7 @@ function MemoryRoom({ data, onNodeSelect }) {
     const onSelect = (event) => {
       onNodeSelect(event.detail);
       if (Number.isInteger(event.detail?.zoneIndex)) {
-        setZoneOverride(event.detail.zoneIndex);
-        setHighlightZone(event.detail.zoneIndex);
+        onZoneSelect(event.detail.zoneIndex);
       }
     };
     const onClear = () => onNodeSelect(null);
@@ -180,24 +202,18 @@ function MemoryRoom({ data, onNodeSelect }) {
       node.removeEventListener("node-select", onSelect);
       node.removeEventListener("node-clear", onClear);
     };
-  }, [onNodeSelect]);
+  }, [onNodeSelect, onZoneSelect]);
 
   const submitSearch = (event) => {
     event.preventDefault();
     const match = brainRef.current?.find?.(query)?.[0];
     if (!match) return;
     brainRef.current.focusNode(match.name);
-    setZoneOverride(match.zone);
-    setHighlightZone(match.zone);
-  };
-
-  const selectZone = (idx) => {
-    setZoneOverride(idx);
-    setHighlightZone(idx);
+    onZoneSelect(match.zone);
   };
 
   return (
-    <section className="memory-room">
+    <section className="memory-room memory-graph-room">
       <div className="brain-wrap">
         <delphi-brain
           ref={brainRef}
@@ -213,17 +229,13 @@ function MemoryRoom({ data, onNodeSelect }) {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search real vault beads"
-            aria-label="Search real vault beads"
+            placeholder="Find a note, file or project"
+            aria-label="Find a note, file or project"
           />
-          {query ? <span>{searchMatches.length} match{searchMatches.length === 1 ? "" : "es"}</span> : null}
+          {query ? <button type="button" onClick={() => setQuery("")}>clear</button> : null}
         </form>
-        <div className="brain-help">drag to spin · click a node · enter opens first match</div>
+        <div className="brain-help">drag to spin · click a node to open it</div>
       </div>
-      <section className="zone-panel">
-        <PanelTitle title="Zones" detail={memory?.active_zone_source ?? "backend zone state unavailable"} />
-        <ZoneList zones={memory?.zones ?? []} active={activeZone} onSelect={selectZone} />
-      </section>
     </section>
   );
 }
@@ -275,14 +287,26 @@ function SystemRoom({ data, loading, error, refresh }) {
   );
 }
 
-function ContextColumn({ data, room, selectedNode, loading, error }) {
+function ContextColumn({ data, room, selectedNode, loading, error, activeMemoryZone, onMemoryZoneSelect }) {
   const memory = data?.memory;
   const context = data?.system?.context;
   const cue = data?.cue_cards?.[0] ?? firstUnavailableCue(data);
+  const preview = useDelphiStore((s) => s.preview);
+
+  if (room === "chat") {
+    return <ChatReferenceColumn data={data} preview={preview} context={context} memory={memory} cue={cue} />;
+  }
+
+  if (room === "memory") {
+    return (
+      <aside className="context-column memory-context-column">
+        <MemoryGraphReadout memory={memory} selectedNode={selectedNode} activeZone={activeMemoryZone} onZoneSelect={onMemoryZoneSelect} />
+      </aside>
+    );
+  }
+
   return (
     <aside className="context-column">
-      {room === "chat" ? <ArtifactPanel /> : null}
-      {room === "memory" ? <MemoryReadout memory={memory} selectedNode={selectedNode} /> : null}
       {room === "practice" ? <PracticeReadout practice={data?.practice} /> : null}
       {room === "system" ? <SystemReadout data={data} /> : null}
       <section className="readout-card">
@@ -304,22 +328,100 @@ function ContextColumn({ data, room, selectedNode, loading, error }) {
   );
 }
 
-function ArtifactPanel() {
+function ChatReferenceColumn({ data, preview, context, memory, cue }) {
+  const title = previewTitle(preview);
+  const mode = useDelphiStore((s) => s.mode);
   return (
-    <section className="artifact-panel" aria-label="Artifact output canvas">
-      <OutputCanvas />
-    </section>
+    <aside className="context-column chat-reference-column">
+      <section className="artifact-browser">
+        <div className="artifact-browser-head">
+          <i className="ph ph-code" />
+          <span>{title}</span>
+          <div>
+            <i className="ph ph-caret-left" />
+            <small>1 of 1</small>
+            <i className="ph ph-caret-right" />
+            <i className="ph ph-x" />
+          </div>
+        </div>
+        <ArtifactBody preview={preview} />
+        <div className="artifact-browser-actions">
+          <button type="button">Copy</button>
+          <button type="button">Save to vault</button>
+        </div>
+      </section>
+      <section className="readout-card compact-readout">
+        <div className="readout-heading"><span>Right now</span><b>{mode.toLowerCase()}</b></div>
+        <Readout label="Context" value={contextTokens(context)} />
+        <Readout label="Rate" value={`${tps(data?.system?.uplink?.last_tokens_per_second) ?? "—"} · wrote ${lastVaultWrite(memory)}`} />
+      </section>
+      <section className="readout-card compact-readout">
+        <div className="panel-title"><h2>My systems</h2></div>
+        <MiniServices services={(data?.services ?? []).slice(0, 5)} />
+      </section>
+      <section className="cue-card chat-cue-card">
+        <i className="ph ph-exam" />
+        <div><h3>{cue.title}</h3><p>{cue.detail}</p></div>
+        <i className="ph ph-arrow-right" />
+      </section>
+    </aside>
   );
 }
 
-function MemoryReadout({ memory, selectedNode }) {
+function ArtifactBody({ preview }) {
+  if (preview?.kind === "code") {
+    return <pre className="artifact-code"><code>{preview.content}</code></pre>;
+  }
+  if (preview?.content) {
+    return <pre className="artifact-code"><code>{preview.content}</code></pre>;
+  }
+  return <pre className="artifact-code"><code>{"// Output previews open here beside the conversation.\n// Ask Delphi to build, inspect, or draft something to populate this canvas."}</code></pre>;
+}
+
+function previewTitle(preview) {
+  if (!preview) return "output/canvas";
+  if (preview.kind === "code") return `preview.${extensionForPreview(preview.language)}`;
+  return `${preview.kind ?? "artifact"}/preview`;
+}
+
+function extensionForPreview(language) {
+  const lang = String(language ?? "txt").toLowerCase();
+  if (lang === "javascript") return "js";
+  if (lang === "typescript") return "ts";
+  if (lang === "python") return "py";
+  if (lang === "markdown") return "md";
+  return lang.replace(/[^a-z0-9]/g, "") || "txt";
+}
+
+function MemoryGraphReadout({ memory, selectedNode, activeZone, onZoneSelect }) {
+  const fill = memory?.fill ?? 0;
+  const nearFull = fill >= 0.7;
   return (
-    <section className="readout-card">
-      <PanelTitle title="Bitspace" detail="vault bytes ÷ configured allotment" />
-      <div className="big-number">{formatBytes(memory?.vault_bytes)} <span>of {formatBytes(memory?.vault_allotted_bytes)} · {formatPct(memory?.fill) ?? "—"}</span></div>
-      <Meter fill={memory?.fill} memory />
-      {selectedNode ? <Readout label={selectedNode.kind} value={selectedNode.name} /> : <Readout label="Beads" value={`${memory?.beads?.length ?? 0} real vault paths`} />}
-    </section>
+    <>
+      <section className={`readout-card bitspace-card ${nearFull ? "is-warning" : ""}`}>
+        <div className="readout-heading"><span>Bitspace</span>{nearFull ? <b><i className="ph ph-warning" /> nearing full</b> : null}</div>
+        <div className="big-number">{formatBytes(memory?.vault_bytes)} <span>of {formatBytes(memory?.vault_allotted_bytes)} · {formatPct(memory?.fill) ?? "—"}</span></div>
+        <Meter fill={memory?.fill} memory />
+        <button type="button" className="btn btn-primary bitspace-button">Give me room to 32 GB</button>
+      </section>
+      <section className="memory-zones-card">
+        <PanelTitle title="Zones" />
+        <ZoneList zones={memory?.zones ?? []} active={activeZone} onSelect={onZoneSelect} />
+      </section>
+      {selectedNode ? (
+        <section className="selected-bead-card">
+          <div><i className="ph ph-file-text" /><strong>{selectedNode.name}</strong></div>
+          <p>{selectedNode.kind ?? "vault bead"} · zone {selectedNode.zoneIndex ?? "—"}</p>
+          <button type="button" className="btn btn-primary">Open bead</button>
+        </section>
+      ) : (
+        <section className="cue-card memory-cue-card">
+          <i className="ph ph-cursor-click" />
+          <div><h3>Every bead is something I know</h3><p>Hover to read it, click to open it.</p></div>
+          <i className="ph ph-arrow-right" />
+        </section>
+      )}
+    </>
   );
 }
 
@@ -346,7 +448,7 @@ function SystemReadout({ data }) {
 }
 
 function PanelTitle({ title, detail }) {
-  return <div className="panel-title"><h2>{title}</h2><p>{detail}</p></div>;
+  return <div className="panel-title"><h2>{title}</h2>{detail ? <p>{detail}</p> : null}</div>;
 }
 
 function Trace({ label, value }) {

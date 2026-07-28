@@ -130,12 +130,15 @@ describe("Delphi AI Home UI", () => {
     expect(brain).toHaveAttribute("fill", "0.42");
     expect(brain).toHaveAttribute("zone", "4");
     expect(brain.getAttribute("data-nodes")).toContain("entities/Delphi.md");
-    expect(screen.getByText("3 real vault paths")).toBeInTheDocument();
+    expect(screen.getByText("Every bead is something I know")).toBeInTheDocument();
+    expect(screen.getByText("Give me room to 32 GB")).toBeInTheDocument();
+    expect(screen.getByText("Timeline")).toBeInTheDocument();
+    expect(screen.getByText("Graph")).toHaveClass("is-active");
 
-    const search = screen.getByRole("textbox", { name: /Search real vault beads/ });
+    const search = screen.getByRole("textbox", { name: /Find a note, file or project/ });
     fireEvent.change(search, { target: { value: "delphi" } });
     expect(brain).toHaveAttribute("query", "delphi");
-    expect(screen.getByText("1 match")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "clear" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Trading/ }));
     expect(brain).toHaveAttribute("zone", "1");
