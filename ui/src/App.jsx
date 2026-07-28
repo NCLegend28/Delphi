@@ -242,46 +242,70 @@ function MemoryRoom({ data, onNodeSelect, activeZone, highlightZone, onZoneSelec
 
 function PracticeRoom({ data }) {
   const practice = data?.practice;
+  const due = practice?.due_cards;
   const unavailable = [practice?.due_cards, practice?.accuracy_percent, practice?.streak_days].every((value) => value == null);
   return (
-    <section className="practice-room">
-      <div className="practice-card">
-        <span className="kicker">Practice</span>
-        <h2>{unavailable ? "Spaced repetition is not wired yet." : "Practice is ready."}</h2>
-        <p>{practice?.source ?? "Backend practice state unavailable."}</p>
-        <div className="metric-grid three">
-          <Metric label="vocab cards" value={fmt(practice?.vocab_card_count)} source="vault GRE vocab files" />
-          <Metric label="due cards" value={fmt(practice?.due_cards)} source="SRS schedule unavailable" />
-          <Metric label="streak" value={fmt(practice?.streak_days)} source="SRS history unavailable" />
+    <section className="practice-room practice-reference-room">
+      <header className="practice-room-head">
+        <div>
+          <span className="kicker">Practice</span>
+          <h2>GRE vocab · vault set</h2>
         </div>
+        <span>{fmt(practice?.vocab_card_count) ?? "—"} cards indexed</span>
+      </header>
+      <div className="practice-question-card">
+        <div className="practice-question-top">
+          <span>Choose the closest meaning</span>
+          <b>{unavailable ? "schedule unavailable" : `${fmt(due)} due now`}</b>
+        </div>
+        <h3>Practice queue</h3>
+        <p>{practice?.source ?? "Backend practice state unavailable."}</p>
+        <div className="answer-list" aria-label="practice readiness">
+          <div><b>A</b><span>Cards in vault</span><strong>{fmt(practice?.vocab_card_count) ?? "—"}</strong></div>
+          <div><b>B</b><span>Due now</span><strong>{fmt(practice?.due_cards) ?? "—"}</strong></div>
+          <div><b>C</b><span>Accuracy</span><strong>{formatPctMaybe(practice?.accuracy_percent) ?? "—"}</strong></div>
+          <div><b>D</b><span>Streak</span><strong>{fmt(practice?.streak_days) ?? "—"}</strong></div>
+        </div>
+        <div className="practice-grade-row">
+          <button type="button" disabled>Again · —</button>
+          <button type="button" disabled>Hard · —</button>
+          <button type="button" disabled>Good · —</button>
+          <button type="button" disabled>Easy · —</button>
+        </div>
+        <small>1–4 to grade · Space to reveal once SRS scheduling lands</small>
+        <section className="practice-tests-panel">
+          <PanelTitle title="Practice tests" detail="generated tests are unavailable until backend scheduling lands" />
+          <div className="practice-test-row">
+            <i className="ph ph-exam" />
+            <div><strong>GRE Verbal — full section</strong><span>Paused state unavailable from backend.</span></div>
+            <button type="button" disabled>Resume</button>
+          </div>
+          <div className="practice-test-row">
+            <i className="ph ph-sparkle" />
+            <div><strong>Build me a new one</strong><span>I'll draw from what you've missed and what's in your vault when implemented.</span></div>
+          </div>
+        </section>
       </div>
-      <NotBuilt items={data?.not_built_yet ?? []} />
     </section>
   );
 }
 
 function SystemRoom({ data, loading, error, refresh }) {
   return (
-    <section className="system-room">
-      <PanelTitle title="Services" detail="health cards backed by gateway probes/config" />
-      <ServiceGrid services={data?.services ?? []} />
-      <PanelTitle title="Roster and routing" detail="roster config + today's request counts and p50" />
-      <RosterTable rows={data?.roster ?? []} />
-      <div className="split-panels">
-        <section>
-          <PanelTitle title="Last requests" detail="durable request JSONL" />
-          <RequestLog rows={data?.requests ?? []} />
-        </section>
-        <section>
-          <PanelTitle title="Uplink" detail="last hour from request log" />
-          <Sparkline counts={data?.system?.uplink?.hourly_counts ?? []} />
-          <div className="uplink-stats">
-            <span>{ms(data?.system?.uplink?.last_ttft_ms) ?? "—"} first token</span>
-            <span>{tps(data?.system?.uplink?.last_tokens_per_second) ?? "—"}</span>
-          </div>
-        </section>
+    <section className="system-room system-reference-room">
+      <div className="system-services-block">
+        <PanelTitle title="Services" detail="live probes/config — no fabricated status" />
+        <ServiceGrid services={data?.services ?? []} />
       </div>
-      <button type="button" className="btn btn-secondary" onClick={refresh}>{loading ? "Syncing…" : "Refresh"}</button>
+      <div className="system-roster-block">
+        <PanelTitle title="Roster and routing" detail="classifier routes, configured models, today's request counts" />
+        <RosterTable rows={data?.roster ?? []} />
+      </div>
+      <div className="system-requests-block">
+        <PanelTitle title="Last requests" detail="durable request JSONL" />
+        <RequestLog rows={data?.requests ?? []} />
+      </div>
+      <button type="button" className="btn btn-secondary system-refresh" onClick={refresh}>{loading ? "Syncing…" : "Refresh"}</button>
       {error ? <span className="fault-line">{error}</span> : null}
     </section>
   );
@@ -303,6 +327,14 @@ function ContextColumn({ data, room, selectedNode, loading, error, activeMemoryZ
         <MemoryGraphReadout memory={memory} selectedNode={selectedNode} activeZone={activeMemoryZone} onZoneSelect={onMemoryZoneSelect} />
       </aside>
     );
+  }
+
+  if (room === "practice") {
+    return <PracticeReferenceColumn practice={data?.practice} notBuilt={data?.not_built_yet ?? []} cue={cue} />;
+  }
+
+  if (room === "system") {
+    return <SystemReferenceColumn data={data} memory={memory} cue={cue} />;
   }
 
   return (
@@ -425,6 +457,64 @@ function MemoryGraphReadout({ memory, selectedNode, activeZone, onZoneSelect }) 
   );
 }
 
+function PracticeReferenceColumn({ practice, notBuilt, cue }) {
+  return (
+    <aside className="context-column practice-context-column">
+      <section className="readout-card practice-session-card">
+        <PanelTitle title="This session" />
+        <div className="practice-stat-grid">
+          <div><strong>{fmt(practice?.due_cards) ?? "—"}</strong><span>cleared</span></div>
+          <div><strong>{formatPctMaybe(practice?.accuracy_percent) ?? "—"}</strong><span>accuracy</span></div>
+          <div><strong>{fmt(practice?.streak_days) ?? "—"}</strong><span>day streak</span></div>
+        </div>
+      </section>
+      <section className="readout-card due-card">
+        <PanelTitle title="What's coming due" />
+        <Readout label="Today" value={fmt(practice?.due_cards)} />
+        <Readout label="Tomorrow" value="—" />
+        <Readout label="This week" value="—" />
+      </section>
+      <section className="readout-card slipping-card">
+        <PanelTitle title="Slipping" detail="SRS miss history unavailable" />
+        {(notBuilt.length ? notBuilt.slice(0, 3) : ["No slipping-card data reported."]).map((item) => (
+          <Readout key={item} label={item} value="—" />
+        ))}
+      </section>
+      <section className="cue-card practice-cue-card">
+        <i className="ph ph-lightbulb" />
+        <div><h3>{cue.title}</h3><p>{cue.detail}</p></div>
+        <i className="ph ph-arrow-right" />
+      </section>
+    </aside>
+  );
+}
+
+function SystemReferenceColumn({ data, memory, cue }) {
+  return (
+    <aside className="context-column system-context-column">
+      <section className="readout-card uplink-card">
+        <PanelTitle title="Uplink" detail="last hour" />
+        <strong>{ms(data?.system?.uplink?.last_ttft_ms) ?? "—"} first token</strong>
+        <span>{tps(data?.system?.uplink?.last_tokens_per_second) ?? "—"}</span>
+        <Sparkline counts={data?.system?.uplink?.hourly_counts ?? []} />
+      </section>
+      <section className="readout-card memory-pipeline-card">
+        <PanelTitle title="Memory pipeline" />
+        <Readout label="Last vault write" value={lastVaultWrite(memory)} />
+        <Readout label="Entities linked" value={fmt(memory?.entity_count)} />
+        <Readout label="Projects linked" value={fmt(memory?.project_count)} />
+        <Readout label="Obsidian sync" value={memory?.last_vault_write?.ok ? "up to date" : "unavailable"} />
+      </section>
+      <NotBuilt items={data?.not_built_yet ?? []} />
+      <section className="cue-card system-cue-card">
+        <i className="ph ph-warning" />
+        <div><h3>{cue.title}</h3><p>{cue.detail}</p></div>
+        <i className="ph ph-arrow-right" />
+      </section>
+    </aside>
+  );
+}
+
 function PracticeReadout({ practice }) {
   return (
     <section className="readout-card">
@@ -455,10 +545,6 @@ function Trace({ label, value }) {
   const raw = value ?? "—";
   const display = label === "model" ? compactModelName(raw) : abbreviatePresenceBlurb(raw, 30);
   return <span className="trace-chip" title={`${label}: ${raw}`}><b>{label}</b><span>{display}</span></span>;
-}
-
-function Metric({ label, value, source }) {
-  return <div className="metric-card"><span>{label}</span><strong>{value ?? "—"}</strong><small>{source}</small></div>;
 }
 
 function ServiceGrid({ services }) {

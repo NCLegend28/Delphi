@@ -145,13 +145,18 @@ describe("Delphi AI Home UI", () => {
     expect(brain).toHaveAttribute("highlight", "1");
 
     fireEvent.click(screen.getByRole("button", { name: /Practice/ }));
-    expect(screen.getByText("Spaced repetition is not wired yet.")).toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getByText("GRE vocab · vault set")).toBeInTheDocument();
+    expect(screen.getByText("Practice queue")).toBeInTheDocument();
+    expect(screen.getByLabelText("practice readiness")).toBeInTheDocument();
+    expect(screen.getByText("Practice tests")).toBeInTheDocument();
+    expect(screen.getByText("What's coming due")).toBeInTheDocument();
+    expect(screen.getByText("Slipping")).toBeInTheDocument();
     expect(screen.getByText("SRS due-card scheduling and streak calculation")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /System/ }));
     expect(await screen.findByText("Roster and routing")).toBeInTheDocument();
-    expect(screen.getByText("Request summary")).toBeInTheDocument();
+    expect(screen.getByText("Memory pipeline")).toBeInTheDocument();
+    expect(screen.getByText("Uplink")).toBeInTheDocument();
     expect(screen.getByText("2000 ms")).toBeInTheDocument();
     expect(screen.queryByText("DELPHI NOCTURNE")).not.toBeInTheDocument();
   });
